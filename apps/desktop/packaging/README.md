@@ -18,6 +18,7 @@ Build Desktop installers locally or through Windows or macOS Actions, choose dep
 - [Windows Actions packaging](#windows-actions)
 - [macOS self-hosted packaging](#macos-actions)
 - [Unsigned Windows test installer](#unsigned-windows-test-installer)
+- [Personal Windows source upgrades](#personal-windows-source-upgrades)
 - [Local macOS DMG without release signing](#local-macos-dmg-without-release-signing)
 - [macOS release signing and diagnostics](#macos-release-signing)
 - [Directory builds and preparation](#directory-and-preparation)
@@ -162,6 +163,40 @@ pnpm run package:desktop:win:x64:unsigned
 The command reads `.env.windows` and requires `DSH_DESKTOP_APP_ID` and the [mandatory-update policy settings](../README.md#mandatory-update-policy), including a real HTTPS service origin. The local run and CI use Node 24; the remaining tools are the root `packageManager` version of pnpm, Git, PowerShell 7 (`pwsh`), tar, Python, Visual C++ Build Tools and a Windows SDK. Set `PYTHON` when Python is absent from `PATH`. It writes the installer to `.desktop-build/targets/win-x64/unsigned-artifacts/`, omits ordinary automatic-update configuration, strips signing credentials, and creates no release completion record. EV and upload credentials are unnecessary. Signed packaging and upload retain their release requirements.
 
 Run `pnpm install --frozen-lockfile`, then `pnpm run package:desktop:win:x64:unsigned --check` to validate configuration and tooling before the full command above. Packaging performs its own complete build and isolated runtime smoke without an online model. Stage logs remain under `.desktop-build/packaging-runs/`; a successful build alone does not qualify the installer. Dependency installation and runtime preparation need access to npm, GitHub release assets and nodejs.org; use the existing registry and proxy configuration when the network requires it. Caches and tool locations belong to the build machine, not tracked personal paths.
+
+<a id="personal-windows-source-upgrades"></a>
+
+## Personal Windows source upgrades
+
+The [local upgrade entry](../scripts/upgrade-windows-local.ts) automates personal unsigned builds and a same-path Windows replacement without changing signed updates or publishing artifacts. This is a machine-local opt-in, not release authorization. It requires Windows x64, Node 24, the ordinary unsigned packaging prerequisites, an interactive logged-in user, and a current Harness tool turn whose reply must be saved before restart. Stop frontend watchers and finish separate CLI commands that use the same data roots before starting.
+
+Create an owner-only machine JSON outside the checkout from the [consent example](../config/windows-local-upgrade.example.json). Replace every example path and the uninstall-key GUID with the existing installation's values. Pin the exact checkout, executable, app ID, Harness home, Electron user-data directory, and a separate fixed-drive work root with room for the installer, payload, full data backups, and application recovery copy. The consent file and work root must allow only the current user and SYSTEM; links, redirected roots, overlapping directories, a different HKCU installation location, or a changed installed version are refused. `allowTaskInterruption: true` explicitly permits the temporary loss of tasks and reminders during restart. `deadlineMs` bounds the durable-turn wait from one minute through one day; it does not permit forced shutdown.
+
+First check the local configuration without building, scheduling a task, or stopping Desktop:
+
+```sh
+pnpm run upgrade:desktop:local --config D:\DeepSeekHarness-local-upgrades\consent.json --check
+```
+
+For an explicitly approved version, run the complete build/stage command from the same Harness tool turn:
+
+```sh
+pnpm run upgrade:desktop:local --config D:\DeepSeekHarness-local-upgrades\consent.json --execute --build-version 0.2.1-alpha.4.20261017.1
+```
+
+When the machine consent enables `allowAutomaticLocalVersions`, omitting `--build-version` selects the next retained local index for the product base and current Asia/Shanghai date. Only these personal, nonpublishing unsigned runs use this standing version consent; signed builds, release uploads, and every other packaging command retain the approval rules above. `--prepared-run <absolute-packaging-record-directory>` may reuse the latest successful official unsigned run for that exact version; it does not accept arbitrary installers. The source entry still verifies the actual installer payload's ASAR identity and version, records file hashes, and rejects a release updater configuration.
+
+Before arming, the command qualifies non-forced Restart Manager shutdown with a disposable Electron window that uses isolated browser storage and no Host or Harness data. It stages JavaScript, its own standalone Node executable, the native helper, and installer under the private work root. A least-privilege current-user InteractiveToken Scheduled Task must start independently of the old Host and acknowledge readiness before the command returns. The task runs only while that user is logged in. Policy restrictions, failed qualification, incomplete material, or a missing readiness acknowledgement leave the installed application running. Qualification of the disposable window does not establish that the installed application will accept shutdown.
+
+The returned `armed: true, installed: false` result means the external worker is waiting, not that an upgrade succeeded. Finish the current reply normally. The worker reads the highest stable JSONL or Zstandard Session generation and requires that exact turn's durable successful `turn/end`; cancellation, error, a replaced generation, or a later recorded turn cancels the handoff. It never writes Session events, messages, goals, or configuration. A new task arriving after the final guard can still be interrupted by the consented restart. Desktop shutdown necessarily disconnects the current GUI and agent; reopen the retained session after restart.
+
+After rechecking PID, creation time, executable bytes, and registered location, the worker requests Restart Manager shutdown with flags zero, never force-kills, and waits for the exact application and Host processes to exit. It then copies and hashes the old application, Harness home, and Electron data into private backups. Data-directory links are recorded without following their targets; installed application links are refused. Changing source data aborts the backup. The worker runs official NSIS with `--updated /KEEP_APP_DATA /S` and the exact `/D=` destination last; it omits `--force-run` so the installer cannot launch Desktop with its scrubbed environment. After settled installation, payload/registration verification, and checks for unexpected processes or data changes, the worker explicitly launches Desktop; it never performs an ASAR-only replacement, uninstall-first operation, or blind second launch.
+
+Native helpers, NSIS, and the offline CLI probe receive scrubbed environments without provider keys or tokens. Only the trusted Desktop launch retains provider credentials already available in the Scheduled Task's fresh user environment, in memory only; they are never staged or logged. The worker removes old launcher/runtime routing, pins `DSH_HOME` and `DSH_DESKTOP_USER_DATA_DIR`, and passes `--user-data-dir` explicitly because the packaged shell does not consume the development-only override. Variables available only in the old parent process cannot be recovered by this independent task; use saved credentials or the logged-in user's persistent environment for repeatable restarts. Ordinary signed-updater launch behavior is unchanged.
+
+The completion checks compare the installed executable and ASAR with the inspected payload, require a responsive native window and the launched main process's private startup receipt bound to a fresh nonce, exact version, and both live main/Host PIDs, and execute the installed offline CLI's version command. The receipt is published only after authenticated Host bootstrap and initial document navigation; backend invalidation, shutdown, and quit revoke it. It contains no URL, token, credentials, or environment values. The protected HTTP root is not probed, HTTP 401 is never treated as readiness, and no unauthenticated endpoint is added. These checks do not certify account login, model responses, or every rendered workspace action. A settled installer failure before successor startup can restore the verified whole application and its registered version, then relaunch the old application; neither data root is rolled back. A changed data snapshot, observed successor, postlaunch health failure, or uncertain installer outcome retains backups and reports failure instead of downgrading. An installer deadline never force-terminates it or races it with restoration.
+
+Inspect the private run with `pnpm run upgrade:desktop:local --status <absolute-run-directory>`. The run retains the plan, readiness and arming records, credential-free event journal, backup inventories, and `result.json`; a bounded native notification reports completion or failure. `success: true` requires the completion checks, not just installer exit zero. An unsettled installer retains `active.json` to block another upgrade; inspect the process and retained result before any recovery. Backups and failed/restoration directories are never deleted automatically. Full installed replacement, preservation, and native-policy qualification remain operator evidence until this command has run successfully on the intended machine.
 
 <a id="local-macos-dmg-without-release-signing"></a>
 

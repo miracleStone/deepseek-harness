@@ -47,7 +47,10 @@ export interface MandatoryUpdateWindowOptions {
 // main.ts's protocol.handle shell route serves this document and its renderer assets; the modal requires that route.
 const page = 'dsh-app://shell/mandatory-update.html'
 
-/** Shell-owned update presentation inside the native owner; policy and installation approval remain main-owned. */
+/**
+ * Owns status/action IPC until disposal, even without policy queries; Windows embeds blocking UI in the main document.
+ * Policy and installation approval remain main-process-owned.
+ */
 export class DesktopMandatoryUpdateWindow {
   private readonly embedded = process.platform === 'win32'
   private embeddedParent: BrowserWindow | undefined

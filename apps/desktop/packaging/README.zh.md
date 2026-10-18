@@ -18,6 +18,7 @@ description: "在本地或 Windows／macOS Actions 中生成 Desktop 安装包�
 - [Windows Actions 打包](#windows-actions)
 - [macOS 自托管打包](#macos-actions)
 - [未签名 Windows 测试安装包](#unsigned-windows-test-installer)
+- [个人 Windows 源码升级](#personal-windows-source-upgrades)
 - [无发布签名的本地 macOS DMG](#local-macos-dmg-without-release-signing)
 - [macOS 发布签名与诊断](#macos-release-signing)
 - [目录构建与准备](#directory-and-preparation)
@@ -162,6 +163,40 @@ pnpm run package:desktop:win:x64:unsigned
 该命令读取 `.env.windows`，要求设置 `DSH_DESKTOP_APP_ID` 和[强制更新策略配置](../README.zh.md#mandatory-update-policy)，包括真实的 HTTPS 服务 origin。本机验收和 CI 使用 Node 24；其他工具为根 `packageManager` 固定版本的 pnpm、Git、PowerShell 7（`pwsh`）、tar、Python、Visual C++ Build Tools 和 Windows SDK。Python 不在 `PATH` 中时设置 `PYTHON`。命令将安装包写入 `.desktop-build/targets/win-x64/unsigned-artifacts/`，省略普通自动更新配置，清除签名凭据，且不生成发布完成记录。无需 EV 或上传凭据。签名打包和上传仍遵循正式发布要求。
 
 先运行 `pnpm install --frozen-lockfile`，再运行 `pnpm run package:desktop:win:x64:unsigned --check` 校验配置和工具，最后执行上面的完整命令。打包自行执行完整构建和隔离的运行时 smoke，不调用在线模型。阶段日志保留在 `.desktop-build/packaging-runs/`；仅构建成功不代表安装包验证通过。依赖安装和运行时准备需要访问 npm、GitHub release 资源和 nodejs.org；网络需要时使用现有 registry 和代理配置。缓存与工具位置属于构建机器配置，不在跟踪文件中固定个人路径。
+
+<a id="personal-windows-source-upgrades"></a>
+
+## 个人 Windows 源码升级
+
+[本地升级入口](../scripts/upgrade-windows-local.ts)自动执行个人未签名构建和 Windows 原路径替换，不改变签名更新，也不发布产物。这是本机显式授权，不是发布授权。它要求 Windows x64、Node 24、普通未签名打包的前置条件、已交互登录的用户，以及一个必须先保存回复才能重启的当前 Harness 工具回合。开始前应停止前端 watcher，并结束使用相同数据目录的独立 CLI 命令。
+
+根据[授权示例](../config/windows-local-upgrade.example.json)，在检出目录外创建仅所有者可访问的本机 JSON。将全部示例路径和卸载键 GUID 替换为现有安装的值。固定准确的检出目录、可执行文件、应用 ID、Harness 主目录、Electron 用户数据目录，以及独立固定磁盘上的工作目录；该目录须有空间容纳安装包、解压产物、完整数据备份和应用恢复副本。授权文件和工作目录仅允许当前用户与 SYSTEM 访问；链接、重定向根目录、目录重叠、HKCU 中不同的安装位置或已变更的安装版本都会被拒绝。`allowTaskInterruption: true` 显式允许重启期间暂时中断任务和提醒。`deadlineMs` 将持久化回合等待限制在一分钟至一天之间，不允许强制关闭。
+
+先检查本机配置，不构建、不创建计划任务，也不停止 Desktop：
+
+```sh
+pnpm run upgrade:desktop:local --config D:\DeepSeekHarness-local-upgrades\consent.json --check
+```
+
+对于已明确批准的版本，在同一个 Harness 工具回合中执行完整的构建和暂存命令：
+
+```sh
+pnpm run upgrade:desktop:local --config D:\DeepSeekHarness-local-upgrades\consent.json --execute --build-version 0.2.1-alpha.4.20261017.1
+```
+
+本机授权启用 `allowAutomaticLocalVersions` 后，省略 `--build-version` 会根据产品基线和当前 Asia/Shanghai 日期选择下一个保留的本地序号。只有这些不发布的个人未签名运行使用持续版本授权；签名构建、发布上传和其他所有打包命令仍遵守上面的版本批准规则。`--prepared-run <absolute-packaging-record-directory>` 可复用该准确版本最新成功的官方未签名打包记录，不接受任意安装包。源码入口仍会检查安装包实际产物中 ASAR 的身份和版本、记录文件哈希，并拒绝发布更新配置。
+
+进入待执行状态前，命令通过一个一次性 Electron 窗口验证 Restart Manager 的非强制关闭；该窗口使用隔离的浏览器存储，不使用 Host 或 Harness 数据。命令将 JavaScript、独立 Node 可执行文件、原生辅助程序和安装包暂存在私有工作目录中。最低权限的当前用户 InteractiveToken 计划任务必须独立于旧 Host 启动，并确认就绪，命令才会返回。任务只在该用户保持登录时运行。策略限制、验证失败、材料不完整或缺少就绪确认都会保留运行中的安装应用。一次性窗口的验证不能证明已安装应用也会接受关闭。
+
+返回 `armed: true, installed: false` 只表示外部 worker 正在等待，不表示升级成功。正常完成当前回复。worker 读取最高版本且稳定的 JSONL 或 Zstandard Session 文件，要求该准确回合持久化成功的 `turn/end`；取消、错误、版本文件被替换或已记录的后续回合都会取消交接。它从不写入 Session 事件、消息、目标或配置。最后一次检查后才到达的新任务仍可能被已授权的重启中断。Desktop 关闭必然断开当前 GUI 和 agent；重启后重新打开保留的会话。
+
+重新检查 PID、创建时间、可执行文件字节和注册位置后，worker 以零标志请求 Restart Manager 关闭，不强杀，并等待准确的应用和 Host 进程退出。随后将旧应用、Harness 主目录和 Electron 数据复制到私有备份并校验哈希。数据目录中的链接只记录目标，不跟随；安装应用中的链接被拒绝。复制期间源数据变化会中止备份。worker 使用 `--updated /KEEP_APP_DATA /S` 运行官方 NSIS，并将准确的 `/D=` 目标放在最后；省略 `--force-run`，防止安装器使用已清理的环境启动 Desktop。安装结束、产物和注册信息通过校验，且未发现意外进程或数据变化后，由 worker 显式启动 Desktop；不会只替换 ASAR、先卸载或盲目重复启动。
+
+原生辅助程序、NSIS 和离线 CLI 探测使用已清理的环境，不接收 provider 密钥或令牌。只有可信的 Desktop 启动会在内存中保留计划任务新用户环境中已有的 provider 凭据，从不写入暂存文件或日志。worker 移除旧启动器和运行时路由变量，固定 `DSH_HOME` 与 `DSH_DESKTOP_USER_DATA_DIR`，并显式传递 `--user-data-dir`，因为打包壳不会读取仅开发模式使用的覆盖变量。独立任务无法恢复仅存在于旧父进程中的变量；可重复重启应使用已保存凭据或已登录用户的持久环境。普通签名 updater 的启动方式不变。
+
+完成检查会比较已安装的可执行文件和 ASAR 与已检查的产物，要求原生窗口响应，且新主进程的私有启动回执匹配新 nonce、准确版本以及仍存活的主进程和 Host PID，并执行已安装离线 CLI 的版本命令。回执只在 Host 鉴权引导及初始文档导航成功后发布；后端失效、关闭或退出时撤销。回执不包含 URL、token、凭据或环境值。不探测受保护的 HTTP 根路径，绝不将 HTTP 401 视为就绪，也不新增未鉴权端点。这些检查不证明账号登录、模型响应或每个已渲染工作区操作。安装器已结束且后继应用尚未启动时，安装失败可恢复经过校验的完整旧应用及其注册版本，然后重启旧应用；不会回滚任一数据目录。数据快照变化、观察到后继应用、启动后的健康检查失败或安装结果不确定时，会保留备份并报告失败，而非降级。安装器超时不会强杀它，也不会与它并发执行恢复。
+
+使用 `pnpm run upgrade:desktop:local --status <absolute-run-directory>` 查看私有运行记录。该目录保留计划、就绪和授权记录、不含凭据的事件日志、备份清单及 `result.json`；有时限的原生通知报告完成或失败。`success: true` 必须通过完成检查，而不仅是安装器退出码为零。安装器结果未确定时保留 `active.json`，阻止再次升级；恢复前应检查进程和保留结果。备份、失败目录和恢复目录从不自动删除。在该命令于目标机器成功运行前，完整安装替换、数据保留及原生策略验证仍需操作人员提供证据。
 
 <a id="local-macos-dmg-without-release-signing"></a>
 

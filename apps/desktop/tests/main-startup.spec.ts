@@ -48,6 +48,8 @@ const harness = await vi.hoisted(async () => {
   const powerMonitor = new EventEmitter()
   const hosts: FakeHost[] = []
   const handlers = new Map<string, InvokeHandler>()
+  const mandatoryStatusesOnLoad: unknown[] = []
+  let probeMandatoryStatusOnLoad = false
   let pluginsEnabled = false
   let prepareUpdate: (() => Promise<boolean>) | undefined
   let publishUpdate: ((state: DesktopUpdateState) => DesktopUpdateState) | undefined
@@ -55,6 +57,8 @@ const harness = await vi.hoisted(async () => {
   let prepared = deferred()
   let hostStarted = deferred()
   let navigated = deferred()
+  let navigationStarted = deferred()
+  let navigationWait: Promise<void> | undefined
   let dialogShown = deferred()
   let quitCompleted = deferred()
   let policyBlocked = deferred()
@@ -126,7 +130,15 @@ const harness = await vi.hoisted(async () => {
     async loadURL(url: string) {
       this.urls.push(url)
       this.webContents.mainFrame.url = url
-      if (url === 'dsh-app://app/') navigated.resolve()
+      if (url === 'dsh-app://app/') {
+        navigationStarted.resolve()
+        if (navigationWait !== undefined) await navigationWait
+        if (probeMandatoryStatusOnLoad) {
+          const status = handlers.get('dsh-desktop:mandatory-status')
+          mandatoryStatusesOnLoad.push(status?.({ sender: this.webContents, senderFrame: this.webContents.mainFrame }))
+        }
+        navigated.resolve()
+      }
     }
     static getAllWindows() { return windows.filter(window => !window.destroyed) }
     setMenu() {}
@@ -153,6 +165,7 @@ const harness = await vi.hoisted(async () => {
     }
   }
   class FakeHost {
+    readonly pid = 1000 + hosts.length
     readonly updateTasks = vi.fn(async (_action: 'inspect' | 'lock' | 'unlock') => false)
     readonly inspectQuit = vi.fn(async () => ({ activeTasks: false, scheduledTasks: false }))
     url = 'http://127.0.0.1:3080/?token=test'
@@ -252,8 +265,12 @@ const harness = await vi.hoisted(async () => {
     }),
     get preparing() { return preparing }, get prepared() { return prepared },
     get hostStarted() { return hostStarted }, get navigated() { return navigated },
+    get navigationStarted() { return navigationStarted },
+    deferNavigation() { const wait = deferred(); navigationWait = wait.promise; return wait },
     get dialogShown() { return dialogShown }, get quitCompleted() { return quitCompleted },
     get policyBlocked() { return policyBlocked },
+    mandatoryStatusesOnLoad,
+    set probeMandatoryStatusOnLoad(value: boolean) { probeMandatoryStatusOnLoad = value },
     get embeddedPolicy() { return embeddedPolicy },
     set embeddedPolicy(value: unknown) { embeddedPolicy = value },
     nextNavigation() { navigated = deferred(); return navigated.promise },
@@ -284,8 +301,11 @@ const harness = await vi.hoisted(async () => {
       updateInstall.mockReset().mockImplementation(async () => updateState)
       nativeTheme.themeSource = 'system'; nativeTheme.shouldUseDarkColors = false
       preparing = deferred(); prepared = deferred(); hostStarted = deferred()
-      navigated = deferred(); dialogShown = deferred(); quitCompleted = deferred()
+      navigated = deferred(); navigationStarted = deferred(); navigationWait = undefined
+      dialogShown = deferred(); quitCompleted = deferred()
       policyBlocked = deferred()
+      mandatoryStatusesOnLoad.length = 0
+      probeMandatoryStatusOnLoad = false
       embeddedPolicy = undefined
       fileDrag.install.mockReset()
       fileDrag.dispose.mockReset().mockResolvedValue(undefined)
@@ -477,6 +497,8 @@ beforeEach(() => {
   vi.stubEnv('DSH_DESKTOP_DEV_PROJECT_DIR', undefined)
   vi.stubEnv('DSH_DESKTOP_MANDATORY_UPDATE_CONFIG', undefined)
   vi.stubEnv('DSH_DESKTOP_UPDATE_JOURNAL_DIR', undefined)
+  vi.stubEnv('DSH_DESKTOP_READY_RECEIPT', undefined)
+  vi.stubEnv('DSH_DESKTOP_READY_NONCE', undefined)
   vi.stubEnv('DSH_CLIENT_VERSION', '1.2.3')
   harness.analyticsEnabled = true
 })
@@ -497,6 +519,101 @@ afterEach(async () => {
 })
 
 describe('desktop main startup', () => {
+  it('publishes private readiness only after document navigation and authenticated Host bootstrap, and revokes before shutdown', async () => {
+    const file = join(harness.app.getPath('userData'), 'desktop-ready.json')
+    const nonce = '11111111-2222-4333-8444-555555555555'
+    vi.stubEnv('DSH_DESKTOP_READY_RECEIPT', file)
+    vi.stubEnv('DSH_DESKTOP_READY_NONCE', nonce)
+    const navigation = harness.deferNavigation()
+    const authenticationStarted = Promise.withResolvers<undefined>()
+    const authentication = Promise.withResolvers<string>()
+    const web = await import('../src/web-document.ts')
+    vi.spyOn(web, 'authenticateWebHost').mockImplementation(() => {
+      authenticationStarted.resolve(undefined)
+      return authentication.promise
+    })
+    try {
+      await import('../src/main.ts')
+      await harness.navigationStarted.promise
+      expect(existsSync(file)).toBe(false)
+      expect(harness.hosts).toHaveLength(0)
+      navigation.resolve()
+      await harness.preparing.promise
+      harness.prepared.resolve()
+      await harness.hostStarted.promise
+      const host = harness.hosts[0]!
+      host.ready.resolve()
+      await authenticationStarted.promise
+      expect(existsSync(file)).toBe(false)
+      const boot = Promise.resolve(invoke(DESKTOP_IPC.boot))
+      authentication.resolve('private-cookie-not-written')
+      await boot
+      expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ schemaVersion: 1, nonce, version: '1.0.0',
+        mainPid: process.pid, hostPid: host.pid })
+      expect(readFileSync(file, 'utf8')).not.toMatch(/token|cookie|url|injections/iu)
+      harness.app.quit()
+      await host.stopping.promise
+      expect(existsSync(file)).toBe(false)
+      host.exited.resolve()
+      await harness.quitCompleted.promise
+    } finally {
+      navigation.resolve()
+      authentication.resolve('private-cookie-not-written')
+    }
+  })
+
+  it('revokes private readiness immediately when the ready backend fails', async () => {
+    const file = join(harness.app.getPath('userData'), 'desktop-ready.json')
+    vi.stubEnv('DSH_DESKTOP_READY_RECEIPT', file)
+    vi.stubEnv('DSH_DESKTOP_READY_NONCE', '11111111-2222-4333-8444-555555555555')
+    const host = await readyForUpdate()
+    await Promise.resolve(invoke(DESKTOP_IPC.boot))
+    expect(existsSync(file)).toBe(true)
+    host.onFailure!(new Error('ready Host failed'))
+    expect(existsSync(file)).toBe(false)
+    host.exited.resolve()
+    await harness.dialogShown.promise
+  })
+
+  it.each([true, false])('serves mandatory status before the first page load and after reload without policy queries (packaged=%s)', async (packaged) => {
+    harness.app.isPackaged = packaged
+    harness.probeMandatoryStatusOnLoad = true
+    const request = vi.fn<typeof fetch>()
+    vi.stubGlobal('fetch', request)
+    const host = await readyForUpdate()
+    const window = harness.windows[0]!
+    expect(harness.mandatoryStatusesOnLoad).toEqual([expect.objectContaining({ policy: { blocking: false, checking: false } })])
+    const status = harness.handlers.get(MANDATORY_IPC.status)!
+    const action = harness.handlers.get(MANDATORY_IPC.action)!
+    await window.loadURL('dsh-app://app/')
+    window.webContents.emit('did-finish-load')
+    expect(harness.handlers.get(MANDATORY_IPC.status)).toBe(status)
+    expect(harness.mandatoryStatusesOnLoad).toMatchObject([
+      { policy: { blocking: false, checking: false } }, { policy: { blocking: false, checking: false } },
+    ])
+    const owned = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
+    for (const operation of ['refresh', 'download', 'install', 'later', 'page', 'copy']) {
+      expect(() => action(owned, operation, '1.0.1')).toThrow('no mandatory decision is active')
+    }
+    for (const unowned of [
+      { ...owned, sender: {} },
+      { ...owned, senderFrame: { ...window.webContents.mainFrame } },
+    ]) {
+      expect(() => status(unowned)).toThrow('unowned renderer')
+      expect(() => action(unowned, 'refresh')).toThrow('unowned renderer')
+    }
+    expect(request).not.toHaveBeenCalled()
+    expect(harness.updateDownload).not.toHaveBeenCalled()
+    expect(harness.updateInstall).not.toHaveBeenCalled()
+    expect(harness.windows).toHaveLength(1)
+    harness.app.quit()
+    await host.stopping.promise
+    expect(harness.handlers.has(MANDATORY_IPC.status)).toBe(false)
+    expect(harness.handlers.has(MANDATORY_IPC.action)).toBe(false)
+    host.exited.resolve()
+    await harness.quitCompleted.promise
+  })
+
   it.each([true, false])('selects the package manager before Host startup (packaged=%s)', async (packaged) => {
     harness.app.isPackaged = packaged
     await readyForUpdate()
@@ -1937,6 +2054,7 @@ describe('desktop main startup', () => {
   })
 
   it('blocks subsequent product operations without stopping the Host and clears only on a fresh no-force policy', async () => {
+    harness.probeMandatoryStatusOnLoad = true
     harness.embeddedPolicy = { origin: 'https://policy.example.com',
       allowedPageOrigins: ['https://downloads.example.com'], intervalMs: 10_000, jitter: 0 }
     vi.stubEnv('DSH_DESKTOP_MANDATORY_UPDATE_CONFIG', '{invalid environment override}')
@@ -1952,6 +2070,13 @@ describe('desktop main startup', () => {
     const action = harness.handlers.get(MANDATORY_IPC.action)!
     const owned = { sender: modal.webContents, senderFrame: modal.webContents.mainFrame }
     expect(status(owned)).toMatchObject({ policy: { blocking: true } })
+    await modal.loadURL('dsh-app://app/')
+    modal.webContents.emit('did-finish-load')
+    expect(harness.mandatoryStatusesOnLoad).toMatchObject([
+      { policy: { blocking: false } }, { policy: { blocking: true } },
+    ])
+    expect(harness.handlers.get(MANDATORY_IPC.status)).toBe(status)
+    expect(harness.handlers.get(MANDATORY_IPC.action)).toBe(action)
     const unowned = [
       { ...owned, sender: {} },
       { ...owned, senderFrame: { url: 'dsh-app://app/index.html' } },

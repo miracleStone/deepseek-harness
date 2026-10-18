@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "mode": "personal-unsigned",
+  "repository": "F:\\source\\deepseek-harness",
+  "executable": "D:\\DeepSeekHarness\\DeepSeek Harness.exe",
+  "home": "C:\\Users\\Alice\\.dsh",
+  "userData": "C:\\Users\\Alice\\AppData\\Roaming\\@deepseek-ai\\dsh-desktop",
+  "workRoot": "D:\\DeepSeekHarness-local-upgrades",
+  "appId": "com.deepseek.harness",
+  "packageName": "@deepseek-ai/dsh-desktop",
+  "uninstallKey": "11111111-2222-4333-8444-555555555555",
+  "allowAutomaticLocalVersions": true,
+  "allowTaskInterruption": true,
+  "deadlineMs": 21600000
+}

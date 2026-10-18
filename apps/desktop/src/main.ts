@@ -71,6 +71,7 @@ import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
+import { DesktopStartupReceipt, resolveDesktopStartupReceiptTarget } from './startup-receipt.ts'
 
 let focusPrimaryWindow = (): void => {}
 let stopForRecovery = async (): Promise<void> => { await stopOperationReports() }
@@ -370,6 +371,14 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
 }
 
 async function main(): Promise<void> {
+  const receiptTarget = resolveDesktopStartupReceiptTarget(process.env)
+  const startupReceipt = receiptTarget === undefined ? undefined
+    : new DesktopStartupReceipt(receiptTarget, { mainPid: process.pid, version: app.getVersion() })
+  const revokeStartupReceipt = (): void => {
+    try { startupReceipt?.revoke() }
+    catch (error) { console.error('Desktop startup receipt could not be revoked; local upgrade readiness is untrusted.', error) }
+  }
+  app.once('will-quit', revokeStartupReceipt)
   const desktopSettings = await readDesktopSettings(app.getPath('userData'))
   void pruneCrashReports(app.getPath('logs'))
   const journalDirectory = process.env.DSH_DESKTOP_UPDATE_JOURNAL_DIR
@@ -434,7 +443,8 @@ async function main(): Promise<void> {
     ? resolveDesktopStartupLocale(null, systemLanguages) : resolveDesktopLocale(windowsLanguage)
   windowsLanguage = locale.id
   let mandatoryPolicy: DesktopMandatoryUpdatePolicy | undefined
-  let mandatoryUI: DesktopMandatoryUpdateWindow | undefined
+  // Startup recovery can quit before the IPC owner is created.
+  let mandatoryUI: DesktopMandatoryUpdateWindow | undefined = undefined
   let policyAuth: DesktopPolicyTestAuth | undefined
   let tray: DesktopTray | undefined
   /**
@@ -585,7 +595,9 @@ async function main(): Promise<void> {
           }).catch(() => undefined)
         }, (enabled) => { analyticsEnabled = enabled })
       },
+      get pid() { return host.pid },
       stop: async () => {
+        revokeStartupReceipt()
         analyticsEnabled = false
         stopAccount?.()
         try { await host.stop(requireCleanStop) }
@@ -600,6 +612,7 @@ async function main(): Promise<void> {
       resolveDragResource: (address: string, signal?: AbortSignal) => host.resolveDragResource(address, signal),
     }
   }, (state) => {
+    if (state.phase !== 'ready') revokeStartupReceipt()
     if (state.phase === 'error') reportFatal(state.failure, 'host')
     else if (!shuttingDown) backendReady = state.phase === 'ready'
   })
@@ -675,7 +688,16 @@ async function main(): Promise<void> {
         await Promise.all([manager.applyRelease(), prepareHostEnvironment()])
       })
       if (backend.host !== undefined) await openInitialWindow()
-      if (backend.host !== undefined) updateJournal?.action('workspace-ready')
+      const readyHost = backend.host
+      if (readyHost !== undefined && !quitting && !recovery.active) {
+        updateJournal?.action('workspace-ready')
+        if (startupReceipt !== undefined) {
+          try {
+            if (readyHost.pid === undefined) throw new Error('Desktop ready Host has no live process ID.')
+            startupReceipt.publish(readyHost.pid)
+          } catch (error) { console.error('Desktop startup receipt was not published; local upgrade readiness is unavailable.', error) }
+        }
+      }
       // The existing Web document resumes through the boot IPC response.
     })().catch((error: unknown) => {
       updateJournal?.action('workspace-failed')
@@ -1545,22 +1567,24 @@ async function main(): Promise<void> {
       if (state.blocking && !wasBlocking) void updateSchedule.check(false, true).catch((error: unknown) => { console.error(error) })
       wasBlocking = state.blocking
     }, policyAuth?.request, () => desktopClientMetadata(locale.id))
-    const policy = mandatoryPolicy
-    mandatoryUI = new DesktopMandatoryUpdateWindow({
-      overlays: updateOverlays,
-      preload: fileURLToPath(new URL('./preload-mandatory.cjs', import.meta.url)), locale,
-      allowedPageOrigins: policyConfig.allowedPageOrigins, parent: () => mainWindow,
-      policy: () => policy.state, update: () => updates.state,
-      refresh: async () => {
-        if (channelState?.error !== undefined) await showConfigurationError()
-        if (channelState?.error === undefined) await Promise.all([checkPolicyManually(), updateSchedule.check(true)])
-      },
-      download: downloadUpdate, install: version => updates.install(version),
-    })
-    void mandatoryPolicy.check('launch').then((state) => {
-      if (app.isPackaged && state.error === 'authentication-required' && !isQuitting()) queuePolicyAuthentication()
-    }).catch((error: unknown) => { console.error(error) })
   }
+  const policy = mandatoryPolicy
+  // The Windows preload queries status on every load, including when policy queries are disabled.
+  mandatoryUI = new DesktopMandatoryUpdateWindow({
+    overlays: updateOverlays,
+    preload: fileURLToPath(new URL('./preload-mandatory.cjs', import.meta.url)), locale,
+    allowedPageOrigins: policyConfig === undefined ? [] : policyConfig.allowedPageOrigins, parent: () => mainWindow,
+    policy: policy === undefined ? () => ({ blocking: false, checking: false }) : () => policy.state,
+    update: () => updates.state,
+    refresh: async () => {
+      if (channelState?.error !== undefined) await showConfigurationError()
+      if (channelState?.error === undefined) await Promise.all([checkPolicyManually(), updateSchedule.check(true)])
+    },
+    download: downloadUpdate, install: version => updates.install(version),
+  })
+  void mandatoryPolicy?.check('launch').then((state) => {
+    if (app.isPackaged && state.error === 'authentication-required' && !isQuitting()) queuePolicyAuthentication()
+  }).catch((error: unknown) => { console.error(error) })
   automaticCheck()
   await reconcileBackend().catch(() => undefined)
   // Window lifecycle callbacks run while backend startup is pending.

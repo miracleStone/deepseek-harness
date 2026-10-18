@@ -202,6 +202,12 @@ export class DesktopHostProcess {
     private readonly onPluginOperation?: (record: PluginOperationRecord) => void,
   ) {}
 
+  /** PID of the live owned child; undefined before spawn and after exit. */
+  get pid(): number | undefined {
+    const child = this.child
+    return child === undefined || child.exitCode !== null || child.signalCode !== null ? undefined : child.pid
+  }
+
   /**
    * Start this child once and await its Web application URL.
    * @returns Ready facts supplied by the child after application startup.

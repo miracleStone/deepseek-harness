@@ -29,6 +29,17 @@ describe('application entrypoints', () => {
     expect(applicationEntrypointViolations(resolve(import.meta.dirname, '..'))).toEqual([])
   })
 
+  it('classifies the local Windows installer handoff as a build tool, not a product bin', () => {
+    const root = fixture()
+    write(root, 'apps/desktop/scripts/upgrade-windows-local.ts', '#!/usr/bin/env node\n')
+    write(root, 'package.json', JSON.stringify({ scripts: { 'upgrade:desktop:local': 'tsx apps/desktop/scripts/upgrade-windows-local.ts' } }))
+    expect(applicationEntrypointViolations(root)).toEqual([])
+    write(root, 'apps/desktop/package.json', JSON.stringify({ bin: { 'dsh-local-upgrade': 'scripts/upgrade-windows-local.ts' } }))
+    expect(applicationEntrypointViolations(root)).toEqual([
+      'apps/desktop/package.json: package bin bypasses the dsh launcher; applications use apps/cli profiles',
+    ])
+  })
+
   it('rejects a package-level application bin', () => {
     const root = fixture()
     write(root, 'packages/example/app/package.json', JSON.stringify({ bin: { app: 'lib/bin.js' } }))
