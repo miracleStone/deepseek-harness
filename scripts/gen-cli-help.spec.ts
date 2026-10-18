@@ -2,7 +2,7 @@
 
 import { execFile } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cliHelpConcurrency, collectCliHelp, main, parseCliHelp, prefetchHelp, topLevelHelpArgs } from './gen-cli-help.ts'
+import { cliHelpConcurrency, cliHelpTimeout, collectCliHelp, main, parseCliHelp, prefetchHelp, topLevelHelpArgs } from './gen-cli-help.ts'
 
 vi.mock('node:child_process', () => ({ execFile: vi.fn() }))
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks() })
@@ -43,6 +43,28 @@ describe('CLI help child budget', () => {
   it.each(['0', '-1', '1.5', '2workers', '02', '9007199254740992'])('rejects %j before spawning help', async (raw) => {
     vi.stubEnv('DSH_CLI_HELP_CONCURRENCY', raw)
     await expect(main()).rejects.toThrow('DSH_CLI_HELP_CONCURRENCY must be a positive integer')
+    expect(execFile).not.toHaveBeenCalled()
+  })
+})
+
+describe('CLI help process deadline', () => {
+  it.each([undefined, ''])('retains the 30-second default without an explicit deadline (%j)', (raw) => {
+    expect(cliHelpTimeout({ DSH_CLI_HELP_TIMEOUT_MS: raw })).toBe(30_000)
+  })
+
+  it.each(['1', '90000', '2147483647'])('uses the explicit finite millisecond deadline %s', (raw) => {
+    expect(cliHelpTimeout({ DSH_CLI_HELP_TIMEOUT_MS: raw })).toBe(Number(raw))
+  })
+
+  it.each(['0', '-1', '1.5', '2x', '02', ' 2', '2 ', 'NaN', 'Infinity', '2147483648'])('rejects invalid deadline %j', (raw) => {
+    expect(() => cliHelpTimeout({ DSH_CLI_HELP_TIMEOUT_MS: raw }))
+      .toThrow('DSH_CLI_HELP_TIMEOUT_MS must be a positive integer')
+  })
+
+  it('rejects an invalid source-profile deadline before spawning help', async () => {
+    vi.stubEnv('DSH_CLI_HELP_CONCURRENCY', '1')
+    vi.stubEnv('DSH_CLI_HELP_TIMEOUT_MS', '2147483648')
+    await expect(main()).rejects.toThrow('DSH_CLI_HELP_TIMEOUT_MS must be a positive integer')
     expect(execFile).not.toHaveBeenCalled()
   })
 })
@@ -107,7 +129,7 @@ describe('CLI help discovery', () => {
 describe('CLI help prefetch', () => {
   it('starts prefetched reads within the limit and serves them in request order', async () => {
     const { reads, read } = controlledReads()
-    const reader = prefetchHelp(read, [['a'], ['b'], ['c']], 2)
+    const reader = prefetchHelp(read, [['a'], ['b'], ['c']], cliHelpConcurrency('2', 256))
     await flush()
     expect(reads.map(entry => entry.args)).toEqual(['a', 'b'])
     reads[1]?.resolve('B')

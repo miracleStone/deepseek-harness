@@ -186,13 +186,15 @@ describe('maintained repository reference policy', () => {
     remote.git(['update-ref', 'HEAD', missing])
     remote.write('partial-clone/new.md', missing)
 
-    expect(scanRepositoryReferences(clone)).toEqual([])
-    expect(execFileSync('git', ['cat-file', '--batch-check'], {
+    // Enumerating local objects never fetches; querying a missing id can fetch on older Git versions.
+    const localObjects = (): string[] => execFileSync('git', ['cat-file', '--batch-all-objects', '--batch-check=%(objectname)'], {
       cwd: clone,
       encoding: 'utf8',
       env: { ...process.env, GIT_NO_LAZY_FETCH: '1' },
-      input: `${missing}\n`,
-    }).trim()).toBe(`${missing} missing`)
+    }).trim().split('\n')
+    expect(localObjects()).not.toContain(missing)
+    expect(scanRepositoryReferences(clone)).toEqual([])
+    expect(localObjects()).not.toContain(missing)
   })
 
   it('accepts blobs, trees, unknown hex, long digests, and identifiers embedded in alphanumeric words', (test) => {
@@ -209,6 +211,50 @@ describe('maintained repository reference policy', () => {
       'dsh-v0.0.1-rc.1',
     ].join('\n'))
     expect(scanRepositoryReferences(fixture.root)).toEqual([])
+  })
+
+  it.each([
+    ['python/sdk/uv.lock', (id: string) => `wheel = { size = ${id}, url = "https://example.invalid/package.whl" }`],
+    ['pyproject.toml', (id: string) => `size = ${id}`],
+    ['pyproject.toml', (id: string) => `sizes = [${id}, ${id}]`],
+    ['pyproject.toml', (id: string) => `size = +${id}`],
+    ['pyproject.toml', (id: string) => `size = -${id}`],
+    ['pyproject.toml', (id: string) => `size = ${id}.5`],
+    ['pyproject.toml', (id: string) => `size = 0.${id}`],
+  ])('accepts unquoted numeric scalar data in %s', (file, source) => {
+    const id = ['634', '4383'].join('')
+    expect(findRepositoryReferences(file, source(id), new Set([id]))).toEqual([])
+  })
+
+  it.each([
+    ['source.md', (id: string) => `Fixed in ${id}.`],
+    ['source.md', (id: string) => `size = ${id}`],
+    ['other.lock', (id: string) => `size = ${id}`],
+    ['pyproject.toml', (id: string) => `revision = "${id}"`],
+    ['python/sdk/uv.lock', (id: string) => `revision = '${id}'`],
+    ['pyproject.toml', (id: string) => `revision = """${id}"""`],
+    ['pyproject.toml', (id: string) => `revision = '''${id}'''`],
+    ['pyproject.toml', (id: string) => `revision = "escaped \\" ${id}"`],
+    ['pyproject.toml', (id: string) => `git = "https://example.invalid/repository/commit/${id}"`],
+    ['python/sdk/uv.lock', (id: string) => `# Commit ${id}`],
+    ['pyproject.toml', (id: string) => `${id} = 1`],
+    ['pyproject.toml', (id: string) => `[${id}]\nsize = 1`],
+    ['pyproject.toml', (id: string) => `size = ${id}\nincomplete = "`],
+  ])('rejects commit references containing a hex letter in strings, keys, comments, prose, and invalid TOML: %s', (file, source) => {
+    const id = `${numericCommit}a`
+    expect(findRepositoryReferences(file, source(id), new Set([id])))
+      .toEqual([{ file, line: 1, kind: 'commit-hash' }])
+    expect(findRepositoryReferences(file, source(numericCommit), new Set([numericCommit]))).toEqual([])
+  })
+
+  it.each(['\n', '\r\n'])('accepts numeric data beside hexadecimal revisions on the same and later lines with %j', (newline) => {
+    const hash = `${numericCommit}a`
+    const file = 'python/sdk/uv.lock'
+    const source = ['[package]', `size = ${numericCommit}`, `wheel = { size = ${numericCommit}, revision = "${hash}" }`, `revision = "${hash}"`].join(newline)
+    expect(findRepositoryReferences(file, source, new Set([numericCommit, hash]))).toEqual([
+      { file, line: 3, kind: 'commit-hash' },
+      { file, line: 4, kind: 'commit-hash' },
+    ])
   })
 
   it('accepts a prefix that two available commits share and rejects a longer unique prefix', (test) => {

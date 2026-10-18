@@ -1,6 +1,6 @@
 /** Runtime profile resolution uses one eager resolution for ESM and CommonJS. */
 
-import {
+import fs, {
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -10,7 +10,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { createRequire } from 'node:module'
+import { createRequire, syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -226,7 +226,71 @@ function lookupWinner(matrixCase: LookupCase): LookupLayer | 'interception' | 'm
   return 'missing'
 }
 
+/** Observe actual JavaScript filesystem calls while preserving the carrier's realpath implementation. */
+function traceRealpaths<T>(run: (calls: readonly string[]) => T): T {
+  const original = fs.realpathSync
+  const calls: string[] = []
+  fs.realpathSync = new Proxy(original, {
+    apply(target, receiver: unknown, args: unknown[]): unknown {
+      calls.push(String(args[0]))
+      return Reflect.apply(target, receiver, args)
+    },
+  })
+  syncBuiltinESMExports()
+  try { return run(calls) }
+  finally { fs.realpathSync = original; syncBuiltinESMExports() }
+}
+
 describe('runtime resolution', { concurrent: false }, () => {
+  it.each([true, false])('canonicalizes a shared package directory once per compilation (native realpath=%s)', async (nativePresent) => {
+    const f = fixture()
+    const base = await resolutionOf(f)
+    const core = base.entries.find(entry => entry.name === '@deepseek-ai/dsh-core')!
+    const resolution = { ...base, entries: [...base.entries, { ...core, name: 'same-directory' }],
+      linkedRoots: [{ name: 'same-linked-directory', realPath: f.installed }] }
+    const native = Object.getOwnPropertyDescriptor(fs.realpathSync, 'native')!
+    if (!nativePresent) Reflect.deleteProperty(fs.realpathSync, 'native')
+    try {
+      traceRealpaths((calls) => {
+        const registration = installRuntimeInterception(resolution)
+        registrations.push(registration)
+        expect(calls.filter(path => path === f.installed)).toHaveLength(1)
+        expect(registration.packageDir('@deepseek-ai/dsh-core', pathToFileURL(join(f.profile.dir, 'entry.mjs')).href))
+          .toBe(f.installed)
+      })
+    } finally { Object.defineProperty(fs.realpathSync, 'native', native) }
+  })
+
+  it('re-reads a retargeted directory before rejecting a successor and compiling an independent generation', async () => {
+    const f = fixture()
+    const base = await resolutionOf(f)
+    const first = join(f.root, 'first-profile-package')
+    const second = join(f.root, 'second-profile-package')
+    pkg(first, 'profile-package', 1)
+    pkg(second, 'profile-package', 2)
+    const link = join(f.root, 'profile-package-link')
+    symlinkSync(first, link, 'junction')
+    try {
+      const resolution: RuntimeResolution = { ...base, entries: [...base.entries, {
+        name: 'profile-package', packageDir: link, version: '1.0.0', declarer: join(link, 'package.json'), scope: 'profile',
+      }] }
+      const registration = installRuntimeInterception(resolution)
+      registrations.push(registration)
+      unlinkSync(link)
+      symlinkSync(second, link, 'junction')
+      traceRealpaths((calls) => {
+        expect(() => { registration.replace(resolution) }).toThrow(ResolutionRestartRequired)
+        expect(calls.filter(path => path === link)).toHaveLength(1)
+      })
+      traceRealpaths((calls) => {
+        const independent = installRuntimeInterception(resolution)
+        registrations.push(independent)
+        expect(calls.filter(path => path === link)).toHaveLength(1)
+        expect(() => { independent.replace(resolution) }).not.toThrow()
+        expect(calls.filter(path => path === link)).toHaveLength(3)
+      })
+    } finally { unlinkSync(link) }
+  })
   it('computes an immutable runtime resolution without writing profile packages', async () => {
     const f = fixture()
     const resolution = await resolutionOf(f)
@@ -2041,14 +2105,75 @@ describe('runtime resolution', { concurrent: false }, () => {
   it('excludes profile symlinks to files from linked roots', async () => {
     const f = fixture()
     const modules = join(f.profile.dir, 'node_modules')
+    const scope = join(modules, '@scope')
     const target = join(f.root, 'work', 'file.cjs')
     file(target, 'module.exports = { marker: 5 }\n')
-    mkdirSync(join(modules, '@scope'), { recursive: true })
-    symlinkSync(target, join(modules, 'file-link'), 'file')
-    symlinkSync(target, join(modules, '@scope', 'file-link'), 'file')
+    const fileLinks = new Set([join(modules, 'file-link'), join(scope, 'file-link')])
+    for (const path of fileLinks) file(path, 'filesystem entry\n')
+    const targetPath = realpathSync.native(target)
+    const directory = join(f.root, 'work', 'directory')
+    mkdirSync(directory)
+    const directoryLink = join(modules, 'directory-link')
+    symlinkSync(directory, directoryLink, 'junction')
+    const expected = [{ name: 'directory-link', realPath: realpathSync.native(directory) }]
+    const directoryStat = fs.statSync(directory)
+    const originalRead = fs.readdirSync
+    const originalStat = fs.statSync
+    const statDescriptor = Object.getOwnPropertyDescriptor(fs, 'statSync')!
+    const originalNative = fs.realpathSync.native
+    const nativeDescriptor = Object.getOwnPropertyDescriptor(fs.realpathSync, 'native')!
+    const followed = new Set<string>()
+    try {
+      // Only file-link directory entries and their followed targets use injected filesystem metadata.
+      fs.readdirSync = new Proxy(originalRead, {
+        apply(read, receiver: unknown, args: unknown[]): unknown {
+          const entries: unknown = Reflect.apply(read, receiver, args)
+          if ((args[0] !== modules && args[0] !== scope) || !Array.isArray(entries)) return entries
+          return entries.map((entry: unknown) => entry instanceof fs.Dirent && entry.name === 'file-link'
+            ? new Proxy(entry, {
+              get(value, key, owner): unknown {
+                return key === 'isSymbolicLink' ? () => true : Reflect.get(value, key, owner)
+              },
+            })
+            : entry)
+        },
+      })
+      fs.realpathSync.native = new Proxy(originalNative, {
+        apply(native, receiver: unknown, args: unknown[]): unknown {
+          if (typeof args[0] === 'string' && fileLinks.has(args[0])) {
+            followed.add(args[0])
+            return targetPath
+          }
+          return Reflect.apply(native, receiver, args)
+        },
+      })
+      syncBuiltinESMExports()
+      expect(fs.statSync(targetPath).isFile()).toBe(true)
+      expect((await resolutionOf(f)).linkedRoots).toEqual(expected)
+      expect(followed).toEqual(fileLinks)
 
-    const resolution = await resolutionOf(f)
-    expect(resolution.linkedRoots).toEqual([])
+      Object.defineProperty(fs, 'statSync', {
+        ...statDescriptor,
+        value: new Proxy(originalStat, {
+          apply(stat, receiver: unknown, args: unknown[]): unknown {
+            return args[0] === targetPath ? directoryStat : Reflect.apply(stat, receiver, args)
+          },
+        }),
+      })
+      syncBuiltinESMExports()
+      const withoutFileRejection = (await resolutionOf(f)).linkedRoots
+      expect(withoutFileRejection).not.toEqual(expected)
+      expect(withoutFileRejection).toHaveLength(3)
+      expect(withoutFileRejection).toEqual(expect.arrayContaining([
+        { name: 'file-link', realPath: targetPath }, { name: '@scope/file-link', realPath: targetPath },
+      ]))
+    } finally {
+      fs.readdirSync = originalRead
+      Object.defineProperty(fs, 'statSync', statDescriptor)
+      Object.defineProperty(fs.realpathSync, 'native', nativeDescriptor)
+      syncBuiltinESMExports()
+      unlinkSync(directoryLink)
+    }
   })
 
   it.each(['linked target', 'profiles directory'] as const)(

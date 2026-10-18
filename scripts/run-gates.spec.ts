@@ -315,10 +315,16 @@ describe('gate graph validation', () => {
     }
   })
 
-  it.each(['3', 'invalid'])('passes an explicit CLI help allowance %j to its owner', (raw) => {
+  it.each(['3', '128', 'invalid'])('passes an explicit CLI help allowance %j to its owner without delaying siblings', (raw) => {
     vi.stubEnv('DSH_CLI_HELP_CONCURRENCY', raw)
-    const gates = withPnpmEntrypoint(() => gatesForMode('ci-windows-observational-ready'))
-    expect(gates.find(gate => gate.id === 'cli-help')).toMatchObject({ env: { DSH_CLI_HELP_CONCURRENCY: raw } })
+    for (const mode of ['doc-sync', 'ci-static', 'ci-primary', 'check-all', 'ci-windows-observational-ready'] as const) {
+      const gates = withPnpmEntrypoint(() => gatesForMode(mode))
+      const help = gates.find(gate => gate.id === 'cli-help')!
+      expect(help.env).toEqual({ DSH_CLI_HELP_CONCURRENCY: raw })
+      expect(help.needs).toBeUndefined()
+      expect(help.after).toBeUndefined()
+      expect(gates.filter(gate => gate.id !== 'cli-help').every(gate => gate.env?.DSH_CLI_HELP_CONCURRENCY === undefined)).toBe(true)
+    }
   })
 
   it('keeps the concrete terminology policy in the documentation gate', () => {
@@ -1004,6 +1010,7 @@ describe('Node 24 lane ownership', () => {
       expect.arrayContaining([
         'apps/cli/tests/profiles/headless/tests/source-tool.built.e2e.ts',
         'apps/desktop/tests/acl-skill.built.e2e.ts',
+        'packages/client/ui-sidebar-documentpreview/tests/document-preview-license-bundle.built.e2e.ts',
         'packages/subprocess/subprocess-local/tests/spawn-runner-built.e2e.ts',
         'packages/subagent/subagent-codex/tests/loader-composition.e2e.ts',
         'packages/subagent/subagent-claude-code/tests/loader-composition.e2e.ts',

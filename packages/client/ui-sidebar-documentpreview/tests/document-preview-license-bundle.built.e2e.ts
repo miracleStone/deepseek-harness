@@ -1,4 +1,4 @@
-/** Published PDF and spreadsheet chunks retain their bundled license notices. */
+/** Published PDF and spreadsheet chunks retain their bundled license notices in the built-artifact smoke lane. */
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -44,7 +44,9 @@ function runPnpm(args: string[], cwd: string, timeout: number): string {
 }
 
 describe('published document preview licenses', () => {
-  it.skipIf(!existsSync(bundlePath))('keeps bundled licenses in the packed lazy chunks', ({ task }) => {
+  const skipUnbuilt = process.env.DSH_EXAMPLE_MODE !== 'lib' && !existsSync(bundlePath)
+  it.skipIf(skipUnbuilt)('keeps bundled licenses in the packed lazy chunks', ({ task }) => {
+    expect(existsSync(bundlePath)).toBe(true)
     expect(existsSync(pdfChunkPath)).toBe(true)
     const output = mkdtempSync(join(tmpdir(), 'dsh-document-preview-pack-'))
     try {

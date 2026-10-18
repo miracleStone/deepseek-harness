@@ -25,8 +25,7 @@ const PACKAGE_README_GLOBS = [
 ] as const
 
 function packageReadmes(): string[] {
-  return PACKAGE_README_GLOBS
-    .flatMap(pattern => globSync(pattern, { cwd: root, exclude: ['**/node_modules/**'] }))
+  return globSync([...PACKAGE_README_GLOBS], { cwd: root, exclude: ['**/node_modules/**'] })
     .map(file => file.replaceAll('\\', '/'))
     .sort()
 }

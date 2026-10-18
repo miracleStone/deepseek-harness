@@ -132,12 +132,17 @@ describe('Presented workspace file native open route', () => {
   })
 
   it('opens external regular files through absolute and relative paths but refuses final symlinks', async () => {
-    const { root, cwd, file, open, opener } = await fixture()
+    const { root, cwd, file, ctx, open, opener } = await fixture()
     const outside = join(root, 'outside.txt')
     await writeFile(outside, 'outside')
     const source = join(cwd, file.path)
+    const linkTarget = process.platform === 'win32' ? join(root, 'outside-directory') : outside
+    if (process.platform === 'win32') await mkdir(linkTarget)
     await unlink(source)
-    await symlink(outside, source)
+    // A junction supplies final-link metadata on Windows without file-symlink privileges.
+    await symlink(linkTarget, source, process.platform === 'win32' ? 'junction' : 'file')
+    cleanups.push(() => unlink(source))
+    expect((await ctx.fs.lstat(source))?.type).toBe('symlink')
     expect((await open()).status).toBe(404)
     expect(opener).not.toHaveBeenCalled()
     for (const path of ['../outside.txt', outside]) {

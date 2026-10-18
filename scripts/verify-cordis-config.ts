@@ -10,8 +10,9 @@
  * Loader fixtures resolve from their package manifest.
  */
 
-import { globSync, readFileSync } from 'node:fs'
-import { dirname, relative, resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { globSync, lstatSync, readFileSync, readlinkSync } from 'node:fs'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { Script } from 'node:vm'
 import ts from 'typescript'
 import type { DshBundleManifest } from '../packages/util/package-manifest/src/types.ts'
@@ -36,7 +37,7 @@ const root = resolve(import.meta.dirname, '..')
 // These overlays are consumed by the built dsh app, so their bare specifiers
 // resolve from apps/cli.
 const appOverlayFiles = new Set([
-  ...globSync('apps/cli/config/examples/**/*.yml', { cwd: root }),
+  ...globSync('apps/cli/config/examples/**/*.yml', { cwd: root }).map(file => file.replaceAll('\\', '/')),
 ])
 const metadataFields = ['id', 'name', 'group', 'inject', 'intercept', 'isolate'] as const
 
@@ -60,10 +61,14 @@ const errors: string[] = []
 const pluginReferences: PluginReference[] = []
 
 if (import.meta.main) {
-  const files = cordisConfigFiles(root)
+  const files = cordisConfigFiles(root).map(file => file.replaceAll('\\', '/'))
+  const trackedSymlinks = new Set(execFileSync('git', ['ls-files', '--stage', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 26 })
+    .split('\0')
+    .filter(entry => entry.startsWith('120000 '))
+    .map(entry => entry.slice(entry.indexOf('\t') + 1)))
 
   for (const file of files) {
-    const document = loadCordisYaml(readFileSync(resolve(root, file), 'utf8'))
+    const document = readCordisConfig(root, file, trackedSymlinks)
     if (!isUnknownArray(document)) {
       errors.push(`${file}: root must be a Loader entry array`)
       continue
@@ -86,6 +91,36 @@ if (import.meta.main) {
     process.exitCode = 1
   } else {
     console.log(`verify-cordis-config: ${files.length} config files passed.`)
+  }
+}
+
+/**
+ * Read Loader YAML through repository-local aliases. Git symlinks checked out as regular files
+ * (`core.symlinks=false`) contain their target path; other regular files remain YAML inputs.
+ * @param repoRoot Repository root containing the configuration and every alias target.
+ * @param file Repository-relative configuration path, retained by the caller for diagnostics.
+ * @param trackedSymlinks Slash-normalized Git index paths with mode 120000.
+ * @returns Parsed YAML, including non-array values for the caller to reject.
+ * @throws If an alias cycles, leaves the repository, or cannot be read, or its YAML cannot be parsed.
+ */
+export function readCordisConfig(repoRoot: string, file: string, trackedSymlinks: ReadonlySet<string>): unknown {
+  const visited = new Set<string>()
+  let current = resolve(repoRoot, file)
+  while (true) {
+    const within = relative(repoRoot, current)
+    if (isAbsolute(within) || within === '..' || within.startsWith(`..${sep}`)) {
+      throw new Error(`${file}: configuration alias target must remain inside the repository`)
+    }
+    if (visited.has(current)) throw new Error(`${file}: configuration alias cycle`)
+    visited.add(current)
+    const stat = lstatSync(current)
+    if (stat.isSymbolicLink()) {
+      current = resolve(dirname(current), readlinkSync(current))
+      continue
+    }
+    const source = readFileSync(current, 'utf8')
+    if (!trackedSymlinks.has(within.replaceAll('\\', '/'))) return loadCordisYaml(source)
+    current = resolve(dirname(current), source)
   }
 }
 

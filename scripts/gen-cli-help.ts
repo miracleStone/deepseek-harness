@@ -82,6 +82,25 @@ export function cliHelpConcurrency(raw: string | undefined, fallback: number): n
   return parsed
 }
 
+/**
+ * Resolve the finite deadline for one source-profile help process.
+ * @param env - Environment containing optional `DSH_CLI_HELP_TIMEOUT_MS`; defaults to 30 seconds.
+ * @returns The positive millisecond budget, within Node's timer range; invalid settings fail before any child starts.
+ */
+export function cliHelpTimeout(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveIntegerSetting(env, 'DSH_CLI_HELP_TIMEOUT_MS', 30_000, 2_147_483_647)
+}
+
+function positiveIntegerSetting(env: NodeJS.ProcessEnv, name: string, fallback: number, maximum = Number.MAX_SAFE_INTEGER): number {
+  const raw = env[name]
+  if (raw === undefined || raw === '') return fallback
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum || String(parsed) !== raw) {
+    throw new Error(`gen-cli-help: ${name} must be a positive integer at most ${maximum}, got ${JSON.stringify(raw)}.`)
+  }
+  return parsed
+}
+
 /** Help reads started ahead of an in-order consumer. */
 export interface PrefetchedHelpReader {
   /**
@@ -194,6 +213,7 @@ export async function collectCliHelp(
 
 async function collectHelp(): Promise<HelpPage[]> {
   const concurrency = cliHelpConcurrency(process.env.DSH_CLI_HELP_CONCURRENCY, defaultParallelism())
+  const timeout = cliHelpTimeout()
   const directory = mkdtempSync(join(tmpdir(), 'dsh-cli-help-'))
   const profiles = Object.keys(PROFILE_TEMPLATES)
   // Aggregate callers allocate this leaf's children separately from the other running gates.
@@ -211,7 +231,7 @@ async function collectHelp(): Promise<HelpPage[]> {
     const help = execFileAsync(process.execPath, [
       '--import', 'tsx/esm', 'apps/cli/src/bin.ts', ...args, '--help',
     ], {
-      cwd: root, env: environment, encoding: 'utf8', timeout: 30_000,
+      cwd: root, env: environment, encoding: 'utf8', timeout,
       killSignal: 'SIGKILL', maxBuffer: 2 * 1024 * 1024,
     })
     // Killing directly, not through execFile's signal option, settles the read only after the child closes.

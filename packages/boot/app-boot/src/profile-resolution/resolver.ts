@@ -191,23 +191,33 @@ function canonicalPath(path: string): string {
   }
 }
 
-function prefixes(path: string): readonly string[] {
+function prefixes(path: string, realPath: string = canonicalPath(path)): readonly string[] {
   const configured = resolve(path) + sep
-  const canonical = canonicalPath(path) + sep
+  const canonical = realPath + sep
   return canonical === configured ? [configured] : [configured, canonical]
 }
 
 function compileResolution(resolution: RuntimeResolution): CompiledResolution {
+  // Compilation shares path identities across entries and scopes; later filesystem lookups remain live.
+  const paths = new Map<string, string>()
+  const canonicalize = (path: string): string => {
+    const cached = paths.get(path)
+    if (cached !== undefined) return cached
+    const canonical = canonicalPath(path)
+    paths.set(path, canonical)
+    return canonical
+  }
+  const compilePrefixes = (path: string): readonly string[] => prefixes(path, canonicalize(path))
   return {
-    entries: new Map(resolution.entries.map(entry => [entry.name, { ...entry, realDir: canonicalPath(entry.packageDir) }])),
+    entries: new Map(resolution.entries.map(entry => [entry.name, { ...entry, realDir: canonicalize(entry.packageDir) }])),
     profilesDir: resolution.profilesDir,
     profileDir: resolution.profileDir,
-    profilePaths: prefixes(resolution.profilesDir),
-    profile: resolution.profileDir === undefined ? [] : prefixes(resolution.profileDir),
+    profilePaths: compilePrefixes(resolution.profilesDir),
+    profile: resolution.profileDir === undefined ? [] : compilePrefixes(resolution.profileDir),
     installationPaths: [...new Set(resolution.entries
       .filter(entry => entry.scope === 'installation')
-      .flatMap(entry => prefixes(entry.packageDir)))],
-    linkedPaths: resolution.linkedRoots.flatMap(root => prefixes(root.realPath)),
+      .flatMap(entry => compilePrefixes(entry.packageDir)))],
+    linkedPaths: resolution.linkedRoots.flatMap(root => compilePrefixes(root.realPath)),
     localPackageNames: new Set(resolution.localPackageNames),
     esmRoutes: new Map(),
     cjsRoutes: new Map(),

@@ -1,4 +1,4 @@
-/** Recorded npm evidence stays intact while authored files and exact edits remain checked. */
+/** Preserve product identifiers and recorded npm evidence while checking package-name rewrites and exact edits. */
 
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -50,6 +50,61 @@ describe('rescope file selection', () => {
     'packages/example/package.json',
   ])('keeps %s subject to upstream package-name checks', (file) => {
     expect(isRescopeExcluded(file)).toBe(false)
+  })
+})
+
+describe('classified product identifiers', () => {
+  // Assemble upstream spellings so this guard's fixtures are themselves rescope fixed points.
+  const preset = ['cor', 'dis'].join('')
+  const library = ['cosmo', 'kit'].join('')
+  const presetFiles = [
+    'apps/cli/tests/optional-bundle-transitions.e2e.ts',
+    'apps/web/tests/agent-preset-selection.e2e.ts',
+    'apps/web/tests/developer-tools-settings.e2e.ts',
+    'docs/subsystems/schedule.md',
+    'docs/subsystems/schedule.zh.md',
+    'docs/upgrade-guide/v0.2.0-rc.2/schedule-bundle-retired/guide.md',
+    'docs/upgrade-guide/v0.2.0-rc.2/schedule-bundle-retired/guide.zh.md',
+    'docs/upgrade-guide/v0.2.1-alpha.1/subagent-preset-composition/guide.md',
+    'docs/upgrade-guide/v0.2.1-alpha.1/subagent-preset-composition/guide.zh.md',
+    'docs/user/guide/schedule.md',
+    'docs/user/guide/schedule.zh.md',
+    'packages/bundle/web-app/cordis.patch.yml',
+    'packages/client/ui-agent-preset/src/client/CreatePluginMenuItem.tsx',
+    'packages/client/ui-agent-preset/tests/components.client.spec.tsx',
+    'packages/client/ui-agent-preset/tests/create-plugin-menu-item.client.spec.tsx',
+    'packages/client/ui-agent-preset/tests/section-store.client.spec.ts',
+  ]
+
+  it.each(presetFiles)('preserves the preset id in %s', (file) => {
+    const source = file.endsWith('.md') ? `The \`${preset}\` preset.\n`
+      : file.endsWith('.yml') ? `# The \`${preset}\` preset.\n` : `const preset = '${preset}'\n`
+    expect(rescopeText(source, file)).toEqual({ text: source, lines: 0 })
+    expect(isRescopeExcluded(file)).toBe(false)
+  })
+
+  it.each([
+    'packages/extensions/cordis-host-runner/tests/inspect-registry.spec.ts',
+    'snapshots/session/cordis-inspect-liveness/client-fixture.mjs',
+    'snapshots/session/cordis-inspect-timeout/client-fixture.mjs',
+  ])('preserves inspect event names in %s', (file) => {
+    const source = `ctx.on('${preset}/inspect-query', handler)\nctx.on('${preset}/inspect-query-resolved', handler)\n`
+    expect(rescopeText(source, file)).toEqual({ text: source, lines: 0 })
+  })
+
+  it('still rescopes other upstream packages in a classified file', () => {
+    const source = `const preset = '${preset}'\nimport { noop } from '${library}'\n`
+    expect(rescopeText(source, presetFiles[0]!)).toEqual({
+      text: `const preset = '${preset}'\nimport { noop } from '@deepseek-ai/${library}'\n`, lines: 1,
+    })
+  })
+
+  it('still rejects upstream package tokens outside the exact classified paths', () => {
+    const file = presetFiles[0]!.replace('.e2e.ts', '-unclassified.e2e.ts')
+    const source = `import { Context } from '${preset}'\nimport type { Config } from '${preset}/types'\n`
+    const scoped = `import { Context } from '@deepseek-ai/${preset}'\nimport type { Config } from '@deepseek-ai/${preset}/types'\n`
+    expect(rescopeText(source, file)).toEqual({ text: scoped, lines: 2 })
+    expect(rescopeText(scoped, file, true)).toEqual({ text: source, lines: 2 })
   })
 })
 

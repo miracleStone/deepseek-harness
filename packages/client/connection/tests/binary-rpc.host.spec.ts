@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict'
 import { request } from 'node:http'
 import { gunzipSync } from 'node:zlib'
 import { Context } from '@deepseek-ai/cordis'
@@ -58,7 +59,16 @@ describe('Connection binary RPC', () => {
         req.once('error', reject)
         req.end(init.body as string)
       }))
-      expect(await rpc.call('/api', 'fixture/read', {})).toEqual({ ok: true, value: { data, bytes: data.length } })
+      const result = await rpc.call('/api', 'fixture/read', {})
+      expect(result.ok).toBe(true)
+      if (!result.ok) throw new Error('Binary fixture returned an RPC error')
+      const { value, ...envelope } = result
+      expect(envelope).toEqual({ ok: true })
+      assert(value !== null && typeof value === 'object' && !Array.isArray(value) && 'data' in value)
+      const { data: received, ...metadata } = value
+      expect(metadata).toEqual({ bytes: data.length })
+      assert(received instanceof Uint8Array)
+      expect(Buffer.from(received).equals(data)).toBe(true)
       if (compression === 'gzip') {
         expect(encoding).toBe('gzip')
         expect(transferred).toBeLessThan(data.length / 10)

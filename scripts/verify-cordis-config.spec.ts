@@ -4,10 +4,11 @@
  * metadata field must stay static, and a disabled expression must parse.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { dirname, join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
+import { cordisConfigFiles } from './cordis-config-files.ts'
 import {
   bundleManifestPaths,
   bundlePluginDependencyErrors,
@@ -15,7 +16,94 @@ import {
   metadataExpressionErrors,
   packageTestFixtureDependencyErrors,
   packageTestPluginDependencyErrors,
+  readCordisConfig,
 } from './verify-cordis-config.ts'
+
+describe('Loader configuration aliases', () => {
+  const roots: string[] = []
+  afterEach(() => {
+    for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+  })
+
+  function fixture(): { root: string; file(path: string, source: string): void } {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-cordis-alias-'))
+    roots.push(root)
+    return {
+      root,
+      file(path, source) {
+        const target = join(root, path)
+        mkdirSync(dirname(target), { recursive: true })
+        writeFileSync(target, source)
+      },
+    }
+  }
+
+  it('reads a tracked symlink placeholder without excluding its canonical config from discovery', () => {
+    const f = fixture()
+    f.file('apps/cordis.yml', '../snapshots/cordis.yml')
+    f.file('snapshots/cordis.yml', '- id: shared\n  name: plugin\n')
+    expect(readCordisConfig(f.root, 'apps/cordis.yml', new Set(['apps/cordis.yml'])))
+      .toEqual([{ id: 'shared', name: 'plugin' }])
+    expect(cordisConfigFiles(f.root).map(file => file.replaceAll('\\', '/')))
+      .toEqual(['apps/cordis.yml', 'snapshots/cordis.yml'])
+  })
+
+  it('follows a chain of tracked symlink placeholders', () => {
+    const f = fixture()
+    f.file('cordis.yml', 'alias.cordis.yml')
+    f.file('alias.cordis.yml', 'target.cordis.yml')
+    f.file('target.cordis.yml', '[]\n')
+    expect(readCordisConfig(f.root, 'cordis.yml', new Set(['cordis.yml', 'alias.cordis.yml']))).toEqual([])
+  })
+
+  it('leaves an ordinary path-like YAML scalar invalid instead of treating it as an alias', () => {
+    const f = fixture()
+    f.file('cordis.yml', 'target.cordis.yml')
+    f.file('target.cordis.yml', '[]\n')
+    const document = readCordisConfig(f.root, 'cordis.yml', new Set())
+    expect(document).toBe('target.cordis.yml')
+    expect(Array.isArray(document)).toBe(false)
+  })
+
+  it('preserves a malformed scalar target for rejection through both its alias and canonical path', () => {
+    const f = fixture()
+    f.file('cordis.yml', 'target.cordis.yml')
+    f.file('target.cordis.yml', 'not-an-entry-array\n')
+    const tracked = new Set(['cordis.yml'])
+    for (const file of ['cordis.yml', 'target.cordis.yml']) {
+      expect(readCordisConfig(f.root, file, tracked)).toBe('not-an-entry-array')
+    }
+  })
+
+  it('rejects a tracked alias cycle with the original configuration path', () => {
+    const f = fixture()
+    f.file('cordis.yml', 'alias.cordis.yml')
+    f.file('alias.cordis.yml', 'cordis.yml')
+    expect(() => readCordisConfig(f.root, 'cordis.yml', new Set(['cordis.yml', 'alias.cordis.yml'])))
+      .toThrow('cordis.yml: configuration alias cycle')
+  })
+
+  it.each(['relative', 'absolute'] as const)('rejects %s alias targets outside the repository', (form) => {
+    const f = fixture()
+    f.file('cordis.yml', form === 'relative' ? '../outside.cordis.yml' : join(f.root, '..', 'outside.cordis.yml'))
+    expect(() => readCordisConfig(f.root, 'cordis.yml', new Set(['cordis.yml'])))
+      .toThrow('cordis.yml: configuration alias target must remain inside the repository')
+  })
+
+  it('preserves a missing alias target error', () => {
+    const f = fixture()
+    f.file('cordis.yml', 'missing.cordis.yml')
+    expect(() => readCordisConfig(f.root, 'cordis.yml', new Set(['cordis.yml'])))
+      .toThrow(expect.objectContaining({ code: 'ENOENT' }))
+  })
+
+  it.skipIf(process.platform === 'win32')('reads a native file symlink (creation requires privileges on Windows)', () => {
+    const f = fixture()
+    f.file('target.cordis.yml', '[]\n')
+    symlinkSync('target.cordis.yml', join(f.root, 'cordis.yml'))
+    expect(readCordisConfig(f.root, 'cordis.yml', new Set(['cordis.yml']))).toEqual([])
+  })
+})
 
 describe('verify-cordis-config metadata expressions', () => {
   it('accepts a disabled !!js expression', () => {

@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { lstatSync, readFileSync, readlinkSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { parse as parseToml, TomlDate, type TomlTable, type TomlValue } from 'smol-toml'
 import { canonicalReferenceText } from './verify-public-repository-links.ts'
 
 const root = resolve(import.meta.dirname, '..')
@@ -32,12 +33,46 @@ function isMaintained(file: string): boolean {
   return !excludedPrefixes.some(prefix => file.startsWith(prefix))
 }
 
+/** Parse only declared TOML inputs; invalid documents retain every reference candidate. */
+function numericData(file: string, source: string): TomlTable | undefined {
+  if (!file.endsWith('.toml') && file.split('/').at(-1) !== 'uv.lock') return undefined
+  try {
+    return parseToml(source, { integersAsBigInt: 'asNeeded' })
+  } catch (_invalidToml) {
+    return undefined
+  }
+}
+
+function changedNumericValue(before: TomlValue, after: TomlValue | undefined): boolean {
+  if (typeof before === 'number' || typeof before === 'bigint') {
+    return (typeof after === 'number' || typeof after === 'bigint') && before !== after
+  }
+  if (Array.isArray(before)) {
+    return Array.isArray(after) && before.some((value, index) => changedNumericValue(value, after[index]))
+  }
+  if (typeof before !== 'object' || before instanceof TomlDate
+    || typeof after !== 'object' || after instanceof TomlDate || Array.isArray(after)) return false
+  return Object.entries(before).some(([key, value]) => changedNumericValue(value, after[key]))
+}
+
+/** Replacing digits with zero must change a numeric value, not a string, comment, or table key. */
+function isNumericData(source: string, offset: number, candidate: string, document: TomlTable | undefined): boolean {
+  if (document === undefined || !/^\d+$/u.test(candidate)) return false
+  let replaced: TomlTable
+  try {
+    replaced = parseToml(source.slice(0, offset) + '0' + source.slice(offset + candidate.length), { integersAsBigInt: 'asNeeded' })
+  } catch (_notNumericData) {
+    return false
+  }
+  return changedNumericValue(document, replaced)
+}
+
 /**
  * Inspect a maintained source file against known commit identifiers.
  * @param file - Repository-relative path used in diagnostics and exclusions.
  * @param source - File text or a symlink's stored target.
  * @param commits - Lowercase, unambiguous full or abbreviated commit identifiers.
- * @returns One finding per line and reference kind; digests and other Git object types are accepted.
+ * @returns One finding per line and reference kind; TOML numeric data, digests, and other Git object types are accepted.
  * Decimal-only tokens are ignored, including actual commit identifiers.
  */
 export function findRepositoryReferences(
@@ -47,13 +82,17 @@ export function findRepositoryReferences(
 ): RepositoryReference[] {
   if (!isMaintained(file)) return []
   const references: RepositoryReference[] = []
+  const document = numericData(file, source)
+  let lineStart = 0
   for (const [index, line] of source.split('\n').entries()) {
     if (organizationUrl.test(canonicalReferenceText(line).replace(kitRepositoryUrl, ''))) {
       references.push({ file, line: index + 1, kind: 'organization-url' })
     }
-    if ([...line.matchAll(commitCandidate)].some(match => commits.has(match[0].toLowerCase()))) {
+    if ([...line.matchAll(commitCandidate)].some(match => commits.has(match[0].toLowerCase())
+      && !isNumericData(source, lineStart + match.index, match[0], document))) {
       references.push({ file, line: index + 1, kind: 'commit-hash' })
     }
+    lineStart += line.length + 1
   }
   return references
 }
