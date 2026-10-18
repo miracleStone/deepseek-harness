@@ -108,6 +108,7 @@ describe('dsh-tool-subagent', () => {
       'description',
       'name',
       'prompt',
+      'reasoning_effort',
     ])
     expect(schema!.description).not.toContain('job_output')
   })

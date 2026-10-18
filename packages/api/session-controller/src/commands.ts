@@ -137,6 +137,9 @@ export class SessionCommandController {
         ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
         cwd,
         ...(request.agentPreset === undefined ? {} : { agentPreset: request.agentPreset }),
+        ...(workspace === undefined || workspace.additionalPaths.length === 0
+          ? {}
+          : { additionalWorkspaceRoots: [...workspace.additionalPaths] }),
         reusable: sessionId => !this.ctx.workspaceRegistry.archivedSessionIds.includes(sessionId)
           && (workspace === undefined || workspace.sessionIds.includes(sessionId)),
       })

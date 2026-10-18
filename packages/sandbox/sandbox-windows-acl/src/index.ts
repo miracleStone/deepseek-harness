@@ -13,9 +13,9 @@
  * for the complete boundary). The intersection covers only the object's own
  * access check, so the token is also lowered to Low integrity and every
  * granted directory carries a Low no-write-up label and the ambient-delete
- * deny the `acl` module documents. The write SID is the per-WORKSPACE identity
- * ({@link workspaceWriteSid}): deterministic from the canonical workspace
- * path, so the workspace-root ACE materializes once per workspace per
+ * deny the `acl` module documents. The write SID identifies a workspace-root set
+ * ({@link workspaceWriteSid}): deterministic from its canonical sorted paths,
+ * so the workspace-root ACEs materialize once per root set per
  * machine and every later provision hits the exact-ACE skip — the
  * grant-reuse story the per-session random SID paid a full tree propagation
  * per session for. Each private temp directory instead receives its own SID,
@@ -72,8 +72,8 @@ export interface AclSandboxOptions {
   /**
    * The write SID forming the workspace-write allowlist: REQUIRED under
    * workspace-write, ignored (and must be absent) under read-only. Callers
-   * derive it from the workspace via {@link workspaceWriteSid} — the identity
-   * is per workspace, not per sandbox instance, so the workspace-root ACE
+   * derive it from the canonical root set via {@link workspaceWriteSid} — the
+   * identity is per root set, not per sandbox instance, so each workspace-root ACE
    * outlives every instance and later provisions hit the exact-ACE skip.
    */
   writeSid?: string

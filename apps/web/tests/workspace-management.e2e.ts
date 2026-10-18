@@ -11,7 +11,7 @@
 // are host RPCs with no model involvement, and the one session row the
 // flat/hover/menu/archive scenarios need comes from a seeded fixture (the
 // seeded-history seed reused verbatim — no new recording).
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join, sep } from 'node:path'
 import type { Browser, Locator, Page } from 'playwright'
@@ -1012,6 +1012,149 @@ describe('web e2e: workspace management (create / rename / grouping / hover affo
     await assertFixtureInventory(SNAPSHOT_DIR, [
       '.gitkeep', 'directory-browser.expected.md', 'new-session.expected.md',
     ])
+  })
+})
+
+describe('web e2e: multiple folders per Workspace', () => {
+  it('manages folders across reload and applies directory permissions only to new conversations', async () => {
+    const scaffold = await launchWebScaffold({})
+    let browser: Browser | undefined
+    try {
+      const primaryInput = join(scaffold.workspaceCwd, 'multi-folder-project')
+      const additionalInput = join(scaffold.workspaceCwd, 'related-projects',
+        'a-long-related-folder-name-for-narrow-viewports', 'shared-components')
+      await mkdir(primaryInput, { recursive: true })
+      await mkdir(additionalInput, { recursive: true })
+      const primary = await realpath(primaryInput)
+      const additional = await realpath(additionalInput)
+      const retainedFile = join(additional, 'keep.txt')
+      await writeFile(retainedFile, 'Keep this file when unlinking the folder.\n')
+      const workspace = await scaffold.ctx.workspaceRegistry.create(primary, 'Multi-folder project')
+      browser = await chromium.launch()
+      const page = await newEnglishPage(browser)
+      const tripwire = watchConsole(page)
+      onTestFailed(() => saveFailureShot(page, 'web-e2e-workspace-folders'))
+      await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
+      const composer = page.locator('[data-composer-input][contenteditable="true"]').first()
+      await composer.waitFor()
+      await expect.poll(() => workspace.sessionIds.length).toBe(1)
+      await expect.poll(() => composer.evaluate(element => element === document.activeElement)).toBe(true)
+      const originalId = workspace.sessionIds[0]!
+      const original = scaffold.ctx.sessions.get(originalId)
+      if (original === undefined) throw new Error('initial Workspace conversation was not published')
+      const originalRoots = [...scaffold.ctx.sandboxPolicy.additionalRootsOf(original)]
+      expect(originalRoots).toEqual([])
+      const originalRootEvents = original.snapshotEvents().filter(event => event.type === 'sandbox/workspace-roots')
+      const row = page.locator(`[data-row-key="workspace:${workspace.id}"]`)
+      const management = page.getByRole('dialog', { name: 'Manage workspace folders' })
+      const openManagement = async (): Promise<void> => {
+        const trigger = row.getByRole('button', { name: 'Workspace actions for Multi-folder project' })
+        await expect.poll(async () => { await row.hover(); return trigger.isVisible() }).toBe(true)
+        await trigger.click()
+        await page.getByRole('menuitem', { name: 'Manage folders', exact: true }).click()
+        await management.waitFor()
+      }
+      const createConversation = async () => {
+        const previous = new Set(workspace.sessionIds)
+        const trigger = row.getByRole('button', { name: 'New session in Multi-folder project' })
+        await expect.poll(async () => { await row.hover(); return trigger.isVisible() }).toBe(true)
+        await trigger.click()
+        await expect.poll(() => workspace.sessionIds.find(id => !previous.has(id))).toBeDefined()
+        const id = workspace.sessionIds.find(candidate => !previous.has(candidate))!
+        await page.locator(`[data-conversation-session="${id}"]`).waitFor()
+        const session = scaffold.ctx.sessions.get(id)
+        if (session === undefined) throw new Error('New Session was not published')
+        return session
+      }
+      const reload = async (): Promise<void> => {
+        const warningStart = tripwire.warnings.length
+        await page.reload({ waitUntil: 'load' })
+        await composer.waitFor()
+        await expect.poll(() => composer.evaluate(element => element === document.activeElement)).toBe(true)
+        acknowledgeReloadConnectionLoss(tripwire, warningStart)
+      }
+
+      await openManagement()
+      expect(await management.getByRole('listitem', { name: `Primary folder (cannot remove): ${primary}` }).count()).toBe(1)
+      expect(await management.getByRole('button', { name: /^Remove folder from workspace:/ }).count()).toBe(0)
+      await management.getByRole('button', { name: 'Add folder', exact: true }).click()
+      const picker = page.getByRole('dialog', { name: 'Select Workspace Directory' })
+      await picker.waitFor()
+      await picker.getByRole('button', { name: 'Edit path', exact: true }).click()
+      const pathInput = picker.getByRole('textbox', { name: 'Edit path', exact: true })
+      await pathInput.fill(additional)
+      await page.keyboard.press('Enter')
+      await pathInput.waitFor({ state: 'detached' })
+      await picker.getByRole('button', { name: 'Open', exact: true }).click()
+      await picker.waitFor({ state: 'hidden' })
+      await expect.poll(() => [...workspace.additionalPaths]).toEqual([additional])
+      await management.getByRole('listitem', { name: additional, exact: true }).waitFor()
+      await expect.poll(() => management.getByRole('button', { name: 'Add folder', exact: true }).isEnabled()).toBe(true)
+      expect([...workspace.sessionIds]).toEqual([originalId])
+      expect(workspace.path).toBe(primary)
+      expect(scaffold.ctx.sandboxPolicy.additionalRootsOf(original)).toEqual(originalRoots)
+      expect(original.snapshotEvents().filter(event => event.type === 'sandbox/workspace-roots')).toEqual(originalRootEvents)
+      expect(await management.getByText('Folder changes apply to new conversations only. Existing conversations keep their directory permissions.', { exact: true }).count()).toBe(1)
+      const expected = fileURLToPath(new URL('./expected/workspace-management/folders.expected.md', import.meta.url))
+      await compareOrRefreshGolden(expected, await captureStableAria(
+        page, '[role="dialog"][aria-label="Manage workspace folders"]', scaffold.workspaceCwd,
+        { replacements: [
+          [primary.replaceAll('\\', '\\\\'), '{{primary}}'], [primary, '{{primary}}'],
+          [additional.replaceAll('\\', '\\\\'), '{{additional}}'], [additional, '{{additional}}'],
+        ] },
+      ), MODE)
+      await page.setViewportSize({ width: 390, height: 844 })
+      const geometry = await management.evaluate((dialog) => {
+        const rect = dialog.getBoundingClientRect()
+        return { left: rect.left, right: rect.right, documentWidth: document.documentElement.scrollWidth,
+          pathsFit: [...dialog.querySelectorAll<HTMLElement>('[class*="path"]')]
+            .every(path => path.scrollWidth <= path.clientWidth) }
+      })
+      expect(geometry.left).toBeGreaterThanOrEqual(24)
+      expect(geometry.right).toBeLessThanOrEqual(366)
+      expect(geometry.documentWidth).toBeLessThanOrEqual(390)
+      expect(geometry.pathsFit).toBe(true)
+      await page.setViewportSize({ width: 1280, height: 800 })
+      await page.keyboard.press('Escape')
+      await management.waitFor({ state: 'hidden' })
+      const withAdditional = await createConversation()
+      expect(withAdditional.header.cwd).toBe(primary)
+      expect(scaffold.ctx.sandboxPolicy.resolve({ session: withAdditional, mode: 'workspace-write' }))
+        .toMatchObject({ workspaceRoot: primary, additionalWorkspaceRoots: [additional] })
+      expect(withAdditional.snapshotEvents()).toContainEqual(expect.objectContaining({
+        type: 'sandbox/workspace-roots', data: { additionalWorkspaceRoots: [additional] },
+      }))
+
+      await reload()
+      await openManagement()
+      await management.getByRole('listitem', { name: additional, exact: true }).waitFor()
+      await management.getByRole('button', { name: `Remove folder from workspace: ${additional}`, exact: true }).click()
+      await expect.poll(() => [...workspace.additionalPaths]).toEqual([])
+      await expect.poll(() => management.getByRole('listitem').count()).toBe(1)
+      await expect.poll(() => management.evaluate(dialog => dialog.contains(document.activeElement))).toBe(true)
+      await expect.poll(() => management.getByRole('list').getAttribute('aria-busy')).toBe('false')
+      expect(await readFile(retainedFile, 'utf8')).toBe('Keep this file when unlinking the folder.\n')
+      expect(scaffold.ctx.sandboxPolicy.additionalRootsOf(withAdditional)).toEqual([additional])
+      expect(scaffold.ctx.sandboxPolicy.additionalRootsOf(original)).toEqual(originalRoots)
+      expect(original.snapshotEvents().filter(event => event.type === 'sandbox/workspace-roots')).toEqual(originalRootEvents)
+      await page.keyboard.press('Escape')
+      await management.waitFor({ state: 'hidden' })
+      const afterRemoval = await createConversation()
+      expect(afterRemoval.id).not.toBe(withAdditional.id)
+      expect(scaffold.ctx.sandboxPolicy.resolve({ session: afterRemoval, mode: 'workspace-write' }))
+        .not.toHaveProperty('additionalWorkspaceRoots')
+      expect(scaffold.ctx.sandboxPolicy.additionalRootsOf(withAdditional)).toEqual([additional])
+      expect(workspace.path).toBe(primary)
+      await reload()
+      await openManagement()
+      expect(await management.getByRole('listitem').count()).toBe(1)
+      expect(await management.getByText(additional, { exact: true }).count()).toBe(0)
+      expect(await readFile(retainedFile, 'utf8')).toBe('Keep this file when unlinking the folder.\n')
+      expect(tripwire.pageErrors).toEqual([])
+      expect(tripwire.warnings).toEqual([])
+    } finally {
+      try { await browser?.close() } finally { await scaffold.close() }
+    }
   })
 })
 

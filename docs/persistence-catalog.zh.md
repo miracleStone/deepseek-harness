@@ -56,6 +56,7 @@
 | `event:request/context` | event | `37cbc9cf06d494cfe5c67f078af1605eacb8e4c2c853e9e26455b73de0ee7ccf` | [`{ type: "request/context" }`](#persistence-type-sha256-37cbc9cf06d494cfe5c67f078af1605eacb8e4c2c853e9e26455b73de0ee7ccf) |
 | `event:request/header` | event | `4208123b50df5006b181481ab45fcf1cde807b88d3fd4d340090bc2e202fac41` | [`{ type: "request/header" }`](#persistence-type-sha256-4208123b50df5006b181481ab45fcf1cde807b88d3fd4d340090bc2e202fac41) |
 | `event:sandbox/mode` | event | `516da4cdd6d2f1e5ce488e648578ca51f40e458f707b803e5b24de870e799415` | [`{ type: "sandbox/mode" }`](#persistence-type-sha256-516da4cdd6d2f1e5ce488e648578ca51f40e458f707b803e5b24de870e799415) |
+| `event:sandbox/workspace-roots` | event | `2ed1e856ba397443003fb95c647d12074f9f0255a2892779f87877dba860440e` | [`{ type: "sandbox/workspace-roots" }`](#persistence-type-sha256-2ed1e856ba397443003fb95c647d12074f9f0255a2892779f87877dba860440e) |
 | `event:schedule/change` | event | `a0a2e5c42e1c929445ecd1cd70f49be6b66441894ec72c08e8ae332821d4a3cb` | [`{ type: "schedule/change" }`](#persistence-type-sha256-a0a2e5c42e1c929445ecd1cd70f49be6b66441894ec72c08e8ae332821d4a3cb) |
 | `event:session-log-deepseek/delivery-accepted` | event | `d63b8b8ffad9c02fd80c43a17df4f240c1fe8118ecca9de34f9d5871838ab5b9` | [`{ type: "session-log-deepseek/delivery-accepted" }`](#persistence-type-sha256-d63b8b8ffad9c02fd80c43a17df4f240c1fe8118ecca9de34f9d5871838ab5b9) |
 | `event:session/end-seed` | event | `5e6db6e24948d4a853c71cb9fabd252ad051ce93d4672c1266cf837c1c17b84e` | [`{ type: "session/end-seed" }`](#persistence-type-sha256-5e6db6e24948d4a853c71cb9fabd252ad051ce93d4672c1266cf837c1c17b84e) |
@@ -798,6 +799,20 @@ export type SessionEvent<T extends SessionEventType = SessionEventType> = {
 ```
 
 来源：[`packages/sandbox/sandbox-policy/src/session-mode.ts:33`](../packages/sandbox/sandbox-policy/src/session-mode.ts)
+
+<a id="sandboxworkspace-roots--log-only"></a>
+
+#### `sandbox/workspace-roots` — log-only
+
+```ts persistence-catalog
+/** Additional writable project directories, independent of the active working directory. */
+'sandbox/workspace-roots': {
+  /** Absolute directory paths approved when the Session or delegated child was created. */
+  additionalWorkspaceRoots: string[]
+}
+```
+
+来源：[`packages/sandbox/sandbox-policy/src/workspace-roots.ts:9`](../packages/sandbox/sandbox-policy/src/workspace-roots.ts)
 
 ### `schedule/*`
 
@@ -2471,6 +2486,14 @@ SHA-256: `24b10f7cdae64928f89c49afc2eca0af9eb4a2f135e16f3416e6b8461fef1748`
 SHA-256: `ca085dba2c877feceebf3c62f9d39c6c2a4d2314d97b94b3927a780fe8fe2bb2`
 
 `"sandbox/mode"`
+
+<a id="persistence-type-sha256-3aabcf805ddc20f12673b9c5b97d863d72bdae3841308bf4e337cfe291d40f89"></a>
+
+### `"sandbox/workspace-roots"`
+
+SHA-256: `3aabcf805ddc20f12673b9c5b97d863d72bdae3841308bf4e337cfe291d40f89`
+
+`"sandbox/workspace-roots"`
 
 <a id="persistence-type-sha256-d9edf1862e4471d6ad8a106a3f4160e0643874368707d50ecd8e27e5ee7a2567"></a>
 
@@ -5878,6 +5901,18 @@ SHA-256: `20a57544bbf204dacd1ae6beb2ab29444365c3c869f2afdf489dcdcbc3d9c8c5`
 |---|---|---|
 | `active` | 必需 | `boolean` |
 
+<a id="persistence-type-sha256-9014568098cf28e12985b962bf99a7c405e6dd75dfb990ad70701ba5f60f6e07"></a>
+
+### `{ additionalWorkspaceRoots }`
+
+SHA-256: `9014568098cf28e12985b962bf99a7c405e6dd75dfb990ad70701ba5f60f6e07`
+
+来源：[`packages/sandbox/sandbox-policy/src/workspace-roots.ts:9`](../packages/sandbox/sandbox-policy/src/workspace-roots.ts)
+
+| 属性 | 存在性 | 类型 |
+|---|---|---|
+| `additionalWorkspaceRoots` | 必需 | [`string[]`](#persistence-type-sha256-93c33d9687613293f8c95d46c4d922fe9ceae83b84c384beff5c3315abe005f2) |
+
 <a id="persistence-type-sha256-6e52dd55a1d48954ed5464ec46fe34d9eb65f709baabc9561e7a279910b0c406"></a>
 
 ### `{ agentPreset }`
@@ -8811,6 +8846,22 @@ SHA-256: `516da4cdd6d2f1e5ce488e648578ca51f40e458f707b803e5b24de870e799415`
 | `seq` | 必需 | `number` |
 | `time` | 必需 | `number` |
 | `type` | 必需 | `"sandbox/mode"` |
+
+<a id="persistence-type-sha256-2ed1e856ba397443003fb95c647d12074f9f0255a2892779f87877dba860440e"></a>
+
+<a id="persistence-type-eventsandboxworkspace-roots"></a>
+
+### `{ type: "sandbox/workspace-roots" }`
+
+SHA-256: `2ed1e856ba397443003fb95c647d12074f9f0255a2892779f87877dba860440e`
+
+| 属性 | 存在性 | 类型 |
+|---|---|---|
+| `data` | 必需 | [`{ additionalWorkspaceRoots }`](#persistence-type-sha256-9014568098cf28e12985b962bf99a7c405e6dd75dfb990ad70701ba5f60f6e07) |
+| `ignorable` | 可选 | `true` |
+| `seq` | 必需 | `number` |
+| `time` | 必需 | `number` |
+| `type` | 必需 | `"sandbox/workspace-roots"` |
 
 <a id="persistence-type-sha256-a0a2e5c42e1c929445ecd1cd70f49be6b66441894ec72c08e8ae332821d4a3cb"></a>
 

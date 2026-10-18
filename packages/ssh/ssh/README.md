@@ -27,7 +27,7 @@ English | [中文](README.zh.md)
 
 Compose this service with [`fs-ssh`](../fs-ssh/README.md), [`subprocess-ssh`](../subprocess-ssh/README.md) and [`sandbox-ssh`](../sandbox-ssh/README.md) in a custom `dsh` profile. The host runs the Harness, model transport and Session storage; the remote machine supplies the files and processes. Headless profiles support this arrangement.
 
-The helper validates additional writable roots on the wire; its enforcing provider requires physical directory paths on the remote filesystem. Read-only grants no write access to them.
+The helper validates `additionalWritableRoots` on the wire and preserves their spelling; its enforcing provider requires physical directory paths on the remote filesystem and rejects symlinked grants on each call. Read-only grants no write access to them.
 
 ### Deployment prerequisites
 
@@ -46,6 +46,8 @@ Install an [SSH helper executable archive](../ssh-helper-runtime/README.md), or 
 | `maxFrameBytes` | `67108864` | Per-message JSON payload ceiling, at most 64 MiB |
 | `maxPending` | `128` | Ordinary outstanding requests; heartbeat and bounded cleanup requests have reserved capacity |
 | `leaseMs` | `30000` | Helper heartbeat lease, from 3000 to 600000 ms |
+
+Per-call sandbox and filesystem policies retain `workspaceRoot` as the primary remote directory and accept optional `additionalWorkspaceRoots`. The helper resolves and deduplicates the complete list in the remote filesystem; when extras are supplied, missing or non-directory roots fail before a file mutation or confined launch. `workspace-write` grants all roots, while `read-only` grants none. These paths are never canonicalized against the Harness host filesystem.
 
 Pass the verified `ctx.ssh.ptcLaunch` as the `launch` configuration of [`NodePtcRuntime`](../../ptc-runtime/ptc-runtime-node/README.md). Executable deployments include their worker. Script deployments require both bootstrap fields for PTC; filesystem and Bash use may omit them. The getter refuses an unconfigured script bootstrap. The client rejects mismatched protocol versions, runtime kinds and helper digests before readiness.
 

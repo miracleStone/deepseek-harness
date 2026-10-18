@@ -6,13 +6,16 @@ import {
   WorkspaceActiveSessionError,
   WorkspaceArchivedSessionPinError,
   WorkspaceId,
+  WorkspaceInvalidPathError,
   WorkspaceMoveInvalidError,
+  WorkspacePrimaryFolderError,
   WorkspaceOrderInvalidError,
   WorkspaceUnknownSessionError,
 } from '@deepseek-ai/dsh-workspace'
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import { workspaceView } from './feed.ts'
 import type {
+  WorkspaceAddFolderRequest,
   WorkspaceArchiveSessionRequest,
   WorkspaceArchiveValue,
   WorkspaceCreateRequest,
@@ -25,6 +28,7 @@ import type {
   WorkspacePinSessionRequest,
   WorkspacePinValue,
   WorkspaceRenameRequest,
+  WorkspaceRemoveFolderRequest,
   WorkspaceUnarchiveSessionRequest,
   WorkspaceUnpinSessionRequest,
   WorkspaceValue,
@@ -85,6 +89,40 @@ export class WorkspaceCommands {
           )
         }
         await workspace.setTitle(title)
+      }
+      return { workspace: workspaceView(workspace) }
+    })
+  }
+
+  /**
+   * Add one canonical extra directory without changing the primary path or Session membership.
+   * @param request - Workspace identity and fully qualified existing directory.
+   * @returns the committed Workspace projection.
+   */
+  addFolder(request: WorkspaceAddFolderRequest): Promise<WorkspaceValue> {
+    return this.enqueue(async () => {
+      const workspace = this.requireWorkspace(request.workspaceId)
+      try {
+        await workspace.addFolder(request.path)
+      } catch (error) {
+        throw folderError(error)
+      }
+      return { workspace: workspaceView(workspace) }
+    })
+  }
+
+  /**
+   * Remove an extra directory idempotently; the primary directory cannot be removed.
+   * @param request - Workspace identity and extra folder path, which may no longer exist.
+   * @returns the committed Workspace projection.
+   */
+  removeFolder(request: WorkspaceRemoveFolderRequest): Promise<WorkspaceValue> {
+    return this.enqueue(async () => {
+      const workspace = this.requireWorkspace(request.workspaceId)
+      try {
+        await workspace.removeFolder(request.path)
+      } catch (error) {
+        throw folderError(error)
       }
       return { workspace: workspaceView(workspace) }
     })
@@ -245,6 +283,16 @@ function workspaceNotFound(workspaceId: WorkspaceId): RemoteError<'workspace/not
     `Workspace "${workspaceId}" not found`,
     { workspaceId },
   )
+}
+
+function folderError(error: unknown): unknown {
+  if (error instanceof WorkspaceInvalidPathError) {
+    return new RemoteError('workspace/invalid-path', error.message, { path: error.path }, { cause: error })
+  }
+  if (error instanceof WorkspacePrimaryFolderError) {
+    return new RemoteError('gateway/bad-request', error.message, {}, { cause: error })
+  }
+  return error
 }
 
 function errorMessage(error: unknown): string {

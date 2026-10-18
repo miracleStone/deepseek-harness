@@ -31,6 +31,19 @@ export class WorkspaceArchiveError extends Error {
   }
 }
 
+/** A folder mutation failed; `rpcError` preserves path, primary-removal, and carrier failure details. */
+export class WorkspaceFolderError extends Error {
+  override readonly name = 'WorkspaceFolderError'
+
+  /**
+   * @param operation - Requested folder mutation.
+   * @param rpcError - Host business or folded carrier failure.
+   */
+  constructor(readonly operation: 'add' | 'remove', readonly rpcError: RemoteFailure) {
+    super(`workspace folder ${operation} failed: ${rpcError.code}: ${rpcError.message}`)
+  }
+}
+
 /** Bare observable source for the Workspace Controller snapshot. */
 export interface WorkspaceSource {
   /** Read the identity-stable current snapshot. */
@@ -66,6 +79,22 @@ export interface IWorkspaces {
    * @returns the renamed Workspace.
    */
   rename(workspaceId: WorkspaceId, title: string): Promise<WorkspaceView>
+  /**
+   * Add an extra Workspace folder without changing its primary path or Session membership.
+   * @param workspaceId - target Workspace.
+   * @param path - fully qualified existing Host directory.
+   * @returns the committed Workspace; canonical duplicates are no-ops.
+   * @throws {WorkspaceFolderError} when the Host refuses or the carrier fails; local state remains unchanged.
+   */
+  addFolder(workspaceId: WorkspaceId, path: string): Promise<WorkspaceView>
+  /**
+   * Remove an extra folder idempotently without requiring it to exist.
+   * @param workspaceId - target Workspace.
+   * @param path - canonical extra folder path; primary removal is refused.
+   * @returns the committed Workspace.
+   * @throws {WorkspaceFolderError} when the Host refuses or the carrier fails; local state remains unchanged.
+   */
+  removeFolder(workspaceId: WorkspaceId, path: string): Promise<WorkspaceView>
   /**
    * Delete a Workspace registration without deleting Sessions or files.
    * @param workspaceId - target Workspace.
@@ -142,6 +171,18 @@ export class WorkspaceController extends Service implements IWorkspaces {
   async rename(workspaceId: WorkspaceId, title: string): Promise<WorkspaceView> {
     const result = await this.model.rename(workspaceId, title)
     if (!result.ok) throw commandError('rename', result.error)
+    return result.value.workspace
+  }
+
+  async addFolder(workspaceId: WorkspaceId, path: string): Promise<WorkspaceView> {
+    const result = await this.model.addFolder(workspaceId, path)
+    if (!result.ok) throw new WorkspaceFolderError('add', result.error)
+    return result.value.workspace
+  }
+
+  async removeFolder(workspaceId: WorkspaceId, path: string): Promise<WorkspaceView> {
+    const result = await this.model.removeFolder(workspaceId, path)
+    if (!result.ok) throw new WorkspaceFolderError('remove', result.error)
     return result.value.workspace
   }
 

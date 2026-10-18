@@ -636,6 +636,9 @@ describe('RowActionToast', () => {
   })
 
   it.each([
+    ['folderAddFailed', '无法添加文件夹，请重新选择后重试'],
+    ['folderRemoveFailed', '无法移除文件夹，请稍后重试'],
+    ['folderPickerFailed', '无法选择文件夹，请重新打开选择器'],
     ['pinFailed', '置顶失败，请稍后重试'],
     ['unpinFailed', '取消置顶失败，请稍后重试'],
     ['archivedNotOpenable', '已归档对话暂时无法查看，请取消归档后查看'],
@@ -654,6 +657,15 @@ describe('RowActionToast', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it.each([
+    ['folderAdded', '文件夹已添加，对新建会话生效'],
+    ['folderRemoved', '文件夹已取消关联，磁盘文件保持不变'],
+  ] as const)('shows the %s success through the shared toast', async (kind, text) => {
+    const { notify } = await toastSurface()
+    notify({ kind })
+    expect(screen.getByRole('alert').textContent).toBe(text)
   })
 
   it('shows a refused creation with the Host reason and holds it as long as the archived notice', async () => {

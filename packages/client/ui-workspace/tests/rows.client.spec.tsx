@@ -701,7 +701,10 @@ describe('workspace browser rows', () => {
     expect(screen.getByRole('button', { name: '工作区“Project”的操作' })).toBeTruthy()
 
     // Every answer allowed restores the button, the full menu, and the drag handle.
-    for (const endpoint of ['session/create', 'workspace/rename', 'workspace/delete', 'workspace/insertBefore']) {
+    for (const endpoint of [
+      'session/create', 'workspace/rename', 'workspace/delete', 'workspace/insertBefore',
+      'workspace/addFolder', 'workspace/removeFolder',
+    ]) {
       allowed.add(endpoint)
     }
     view.rerender(<ProjectRowItem {...props} useWorkspaceAccess={useWorkspaceAccess} />)

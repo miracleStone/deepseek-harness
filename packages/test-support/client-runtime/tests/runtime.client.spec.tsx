@@ -838,6 +838,41 @@ describe('workspaces action face', () => {
     }
   })
 
+  it('records folder commands, echoes existing rows without publishing, and honors typed stubs', async () => {
+    const runtime = await SlotTestRuntime.create()
+    try {
+      const ws = runtime.workspaces
+      const workspaceId = 'folders' as WorkspaceId
+      const view = {
+        workspaceId, title: 'Folders', path: '/primary', sessionIds: [],
+        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+        additionalPaths: ['/kept', '/removed'],
+      }
+      await ws.update((draft) => { draft.items = [view] })
+      expect(await ws.addFolder(workspaceId, '/primary')).toEqual(view)
+      expect(await ws.addFolder(workspaceId, '/kept')).toEqual(view)
+      expect((await ws.addFolder(workspaceId, '/new')).additionalPaths).toEqual(['/kept', '/removed', '/new'])
+      expect((await ws.removeFolder(workspaceId, '/removed')).additionalPaths).toEqual(['/kept'])
+      expect(ws.list.getSnapshot().items).toEqual([view])
+      expect((await ws.addFolder('unknown' as WorkspaceId, '/new')).additionalPaths).toEqual(['/new'])
+      expect(await ws.removeFolder('unknown' as WorkspaceId, '/missing')).not.toHaveProperty('additionalPaths')
+      const add = vi.fn(async () => view)
+      const remove = vi.fn(async () => view)
+      ws.stub('addFolder', add)
+      ws.stub('removeFolder', remove)
+      await expect(ws.addFolder(workspaceId, '/new')).resolves.toBe(view)
+      await expect(ws.removeFolder(workspaceId, '/kept')).resolves.toBe(view)
+      expect(add).toHaveBeenCalledWith(workspaceId, '/new')
+      expect(remove).toHaveBeenCalledWith(workspaceId, '/kept')
+      expect(ws.calls.slice(-2)).toEqual([
+        { method: 'addFolder', args: [workspaceId, '/new'] },
+        { method: 'removeFolder', args: [workspaceId, '/kept'] },
+      ])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
   it('records every IWorkspaces verb with inert defaults and honors stubs', async () => {
     const runtime = await SlotTestRuntime.create()
     const ws = runtime.workspaces

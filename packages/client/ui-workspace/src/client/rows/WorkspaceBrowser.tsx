@@ -40,6 +40,7 @@ import {
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
+import { WorkspaceFolders } from '../WorkspaceFolders.tsx'
 import css from './WorkspaceBrowser.module.css'
 
 /**
@@ -912,6 +913,9 @@ export function WorkspaceBrowser({
   notifyArchivedNotOpenable,
   renameWorkspace, useWorkspaceActionRequest, settleWorkspaceAction,
   deleteWorkspace,
+  addWorkspaceFolder,
+  removeWorkspaceFolder,
+  notifyWorkspaceFolder,
   insertWorkspaceBefore,
   unarchiveSession,
   createWorkspace,
@@ -1115,6 +1119,7 @@ export function WorkspaceBrowser({
   const wsPickerOpen = shortcutState.addRequested
   const wsPlusRef = useRef<HTMLButtonElement>(null)
   const workspaceActionRequest = useWorkspaceActionRequest(value => value)
+  const foldersWorkspaceId = workspaceActionRequest?.action === 'manage-folders' ? workspaceActionRequest.workspaceId : null
 
   const openSearchResult = (sessionId: SessionId): void => {
     if (archivedSessionIds.includes(sessionId)) {
@@ -1307,6 +1312,7 @@ export function WorkspaceBrowser({
                 className={css.iconButton}
                 aria-label={t('workspace.add')}
                 aria-keyshortcuts={addShortcut?.aria}
+                disabled={shortcutState.directoryBusy}
                 onClick={() => {
                   requestAddWorkspace()
                 }}
@@ -1324,7 +1330,9 @@ export function WorkspaceBrowser({
           useWorkspaces={useWorkspaces}
           createWorkspace={createWorkspace}
           useDirectoryFlow={useDirectoryFlow}
-          renderDirectoryFlow={owner => renderSlot('sidebar.workspaces.directoryFlow', owner)}
+          renderDirectoryFlow={owner => foldersWorkspaceId === null
+            ? renderSlot('sidebar.workspaces.directoryFlow', owner)
+            : null}
           addOnly
           onBusyChange={setDirectoryBusy}
           side="right"
@@ -1432,7 +1440,23 @@ export function WorkspaceBrowser({
             ))}
       </div>
 
-      {workspaceActionRequest !== null && <WorkspaceDialogs key={`${workspaceActionRequest.action}/${workspaceActionRequest.workspaceId}`}
+      {foldersWorkspaceId !== null && (
+        <WorkspaceFolders
+          key={foldersWorkspaceId}
+          workspaceId={foldersWorkspaceId}
+          useWorkspaceAccess={useWorkspaceAccess}
+          workspace={workspaces.find(workspace => workspace.workspaceId === foldersWorkspaceId)}
+          addWorkspaceFolder={addWorkspaceFolder}
+          removeWorkspaceFolder={removeWorkspaceFolder}
+          notifyWorkspaceFolder={notifyWorkspaceFolder}
+          useDirectoryFlow={useDirectoryFlow}
+          renderSlot={renderSlot}
+          onClose={settleWorkspaceAction}
+          t={t}
+        />
+      )}
+
+      {workspaceActionRequest !== null && workspaceActionRequest.action !== 'manage-folders' && <WorkspaceDialogs key={`${workspaceActionRequest.action}/${workspaceActionRequest.workspaceId}`}
         request={workspaceActionRequest} workspaces={workspaces} renameWorkspace={renameWorkspace} deleteWorkspace={deleteWorkspace}
         settleWorkspaceAction={settleWorkspaceAction} t={t} />}
     </div>

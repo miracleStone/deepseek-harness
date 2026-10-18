@@ -1,39 +1,31 @@
 /**
- * The per-workspace write identity: a deterministic `S-1-4-x-y` SID derived
- * from the canonical workspace path, whose ACEs form that workspace's write
- * allowlist. Every confined execution of the same workspace — across
- * sessions, server restarts, and calls — carries the SAME write SID, so the
- * workspace-root ACE materializes once per workspace per machine (the
- * grant's exact-ACE skip then makes every later provision O(1)) instead of
- * once per session. The SID's power is defined solely by the ACEs that name
- * it (which exist only on the workspace tree and the session's private temp
- * directory), and only tokens minted for that workspace carry it — the SID
- * string itself is not a secret. Temporary directories use a separate,
- * per-directory identity from {@link tempWriteSid}; sharing the workspace
- * identity with temp would let sibling sessions write one another's temp
- * trees.
+ * Deterministic workspace write identities. One canonical root set shares
+ * a capability across sessions, calls, and restarts; standing ACEs on each
+ * root let later provisions skip tree propagation. Different root sets
+ * carry different capabilities, so removing a root cannot retain its grant.
+ * Inputs must be canonical paths (`realpathSync.native`); renaming a root
+ * derives a new identity and leaves the old standing ACEs inert.
  *
- * The input MUST be the canonical workspace path (`realpathSync.native` on
- * Windows — the sandbox-policy `resolveWorkspaceRoot` already applies it):
- * canonicalization converges case/alias spellings, so two spellings of one
- * workspace derive one SID; an as-spelled fallback path would mint a second
- * identity for the same directory (self-healing, at the cost of one extra
- * tree propagation). Renaming the workspace directory derives a new SID —
- * the old standing ACEs are inert residue, and the next session re-propagates
- * once.
+ * Private temp directories use separate per-directory identities. Sharing
+ * the workspace identity with temp would authorize sibling sessions' writes.
+ * SID strings are identifiers, not secrets; their authority comes from ACEs.
  * @module @deepseek-ai/dsh-sandbox-windows-acl/workspace-sid
  */
 
 import { createHash } from 'node:crypto'
 
 /**
- * Derive the workspace's write SID (`S-1-4-x-y`; subauthorities 30-bit,
- * matching the workspace-capability shape the token and ACE layers carry).
- * @param workspaceRoot - the canonical workspace path.
- * @returns the SDDL string form.
+ * Derive a workspace-root set's write SID (`S-1-4-x-y`; 30-bit subauthorities).
+ * A single canonical path retains its identity; arrays are sorted and deduplicated.
+ * @param workspaceRoot - one canonical workspace path or a non-empty set of canonical paths.
+ * @returns the SDDL string form; throws for an empty root set.
  */
-export function workspaceWriteSid(workspaceRoot: string): string {
-  const digest = createHash('sha256').update(workspaceRoot, 'utf8').digest()
+export function workspaceWriteSid(workspaceRoot: string | readonly string[]): string {
+  const roots = typeof workspaceRoot === 'string' ? [workspaceRoot] : [...new Set(workspaceRoot)].sort()
+  const firstRoot = roots[0]
+  if (firstRoot === undefined) throw new Error('workspaceWriteSid requires at least one workspace root')
+  const identity = roots.length === 1 ? firstRoot : `workspace-set\0${JSON.stringify(roots)}`
+  const digest = createHash('sha256').update(identity, 'utf8').digest()
   const first = (digest.readUInt32LE(0) % (2 ** 30 - 1)) + 1
   const second = (digest.readUInt32LE(4) % (2 ** 30 - 1)) + 1
   return `S-1-4-${first}-${second}`

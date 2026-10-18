@@ -23,8 +23,8 @@ export { canonicalPath, workspaceWritableRoots, writableRoots, SandboxInvalidRoo
 
 /**
  * File-effect policy for confined processes. `read-only` permits only required
- * sinks such as `/dev/null`; `workspace-write` also permits the workspace,
- * explicit extra roots, and backend-defined temp areas; `danger-full-access` bypasses confinement. Network
+ * sinks such as `/dev/null`; `workspace-write` also permits the workspace roots,
+ * explicit extra directories, and backend-defined temp areas; `danger-full-access` bypasses confinement. Network
  * and process visibility are outside this vocabulary.
  */
 export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
@@ -33,14 +33,14 @@ export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
 export type ConfinedSandboxMode = Exclude<SandboxMode, 'danger-full-access'>
 
 /**
- * The complete file-effect policy resolved for one capability call. The root
- * is carried even under modes that do not consume it so callers can resolve
+ * The complete file-effect policy resolved for one capability call. Workspace roots
+ * are carried even under modes that do not consume them so callers can resolve
  * policy once before choosing the enforcement path.
  */
 export interface SandboxExecutionPolicy {
   /** The file-effect mode this execution runs under. */
   mode: SandboxMode
-  /** Absolute root directory `workspace-write` may write under. */
+  /** First approved absolute write root; a containing folder can cover the Session's cwd. */
   workspaceRoot: string
   /**
    * Extra physical absolute directories `workspace-write` may also write under.
@@ -50,10 +50,16 @@ export interface SandboxExecutionPolicy {
    */
   additionalWritableRoots?: readonly string[]
   /**
+   * Additional absolute workspace directories writable under `workspace-write`.
+   * Omitted means only the primary workspace; `read-only` grants none of these
+   * roots, and `danger-full-access` bypasses confinement regardless of roots.
+   */
+  additionalWorkspaceRoots?: readonly string[]
+  /**
    * Opaque identity of the calling session (the branded `dsh-session`
    * SessionId). Backends key per-session state off it (e.g. windows-acl gives
-   * each live session/workspace pair a random private temp directory and SID,
-   * while the workspace SID and standing grant remain per-workspace); absent
+   * each live session/workspace-root set a random private temp directory and SID,
+   * while the workspace SID and standing grants remain per-root set); absent
    * for agentless calls, which fall back to per-call backend state.
    */
   sessionId?: SessionId

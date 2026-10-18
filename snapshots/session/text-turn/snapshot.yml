@@ -3,6 +3,7 @@ scenario: text-turn
 profile: headless
 composition: default
 recording: live
+platform: posix
 sessionFormat:
   version: 1
   coverage: [adjacent-migration]

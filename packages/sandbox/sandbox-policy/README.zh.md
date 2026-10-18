@@ -54,7 +54,7 @@ kind: "package-reference"
 
 ### 切换会话模式
 
-会话的模式可以在运行时通过 UI 策略控件或显式切换来更改；切换记录在会话日志中，并在该会话的下一次受限调用时生效。切换通过回放跨重启保留，每个会话保持自己的模式——两个会话绝不会看到彼此状态。切换后的会话继续以不可变的工作区 cwd 作为写入边界。
+会话的模式可以在运行时通过 UI 策略控件或显式切换来更改；切换记录在会话日志中，并在该会话的下一次受限调用时生效。切换通过回放跨重启保留，每个会话保持自己的模式——两个会话绝不会看到彼此状态。切换后的 Session 继续以不可变的主目录 cwd 和已记录的其他工作区根目录作为可写目录。
 
 ### 失败与恢复
 
@@ -72,15 +72,15 @@ kind: "package-reference"
 
 ### 解析优先级
 
-`resolve({ session, mode })` 返回一份完整的逐调用策略：已批准的显式模式优先于会话最后一条 `sandbox/mode` 事件，后者又优先于部署默认值。会话的不可变 `cwd` 提供工作区根目录；否则使用配置的回退值。执行环境中的绝对路径写法保持不变。执行限制的提供方在自己的文件系统上规范化根目录，因此远端 `symlink/..` 路径绝不会在 Harness 主机上解析。
+`resolve({ session, mode })` 返回一份完整的逐调用策略：已批准的显式模式优先于会话最后一条 `sandbox/mode` 事件，后者又优先于部署默认值。Session 的不可变 `cwd` 提供主工作区根目录；否则使用配置的回退值。`sandboxWorkspaceRoots` 投影提供 `sandbox/workspace-roots` 记录的其他规范目录；没有事件表示没有其他目录。有其他文件夹时，解析器在文件系统解析前移除已被其他获准目录覆盖的目录，并以第一个保留目录作为 `workspaceRoot`。这样可防止可替换的嵌套路径重定向独立授权。Session 的 cwd 和已记录的文件夹列表保持不变。配置的 `additionalWritableRoots` 继续作为独立的部署授权列表。执行环境中的绝对路径写法保持不变。执行限制的提供方在自己的文件系统上规范化根目录，因此远端 `symlink/..` 路径绝不会在 Harness 主机上解析。
 
 ### 逐会话存储
 
-运行时切换是在对应会话日志中追加的一条仅写入日志的 `sandbox/mode` 事件——切换本身就是事件，任何机制都不会在带外修改模式状态。`effective = explicit grant ?? fold(events) ?? deployment default`，因此覆盖通过回放跨重启保留，两个会话也绝不会看到彼此状态。工作区标识无需事件：创建时记录的不可变 `SessionHeader.cwd` 是该会话每次调用使用的根。事件仍只进入日志；在每次请求前，归属方会把当前事实贡献给完整运行时上下文快照，agent loop（智能体循环）将该快照记录为一条带来源的 `user/message`。
+运行时切换是在对应会话日志中追加的一条仅写入日志的 `sandbox/mode` 事件——切换本身就是事件，任何机制都不会在带外修改模式状态。`effective = explicit grant ?? fold(events) ?? deployment default`，因此覆盖通过回放跨重启保留，两个会话也绝不会看到彼此状态。不可变的 `SessionHeader.cwd` 记录主根目录。新的多文件夹对话在执行前的设置阶段记录其他已批准的目录；本地委派捕获同一份列表，恢复或分叉保留日志中的权限，不读取可变的工作区注册。事件仍只进入日志；在每次请求前，归属方会把当前事实贡献给完整运行时上下文快照，agent loop（智能体循环）将该快照记录为一条带来源的 `user/message`。
 
 ### 模型可见文本
 
-`sandbox:policy` 贡献说明该模式与具体能力无关的文件操作约定，以及 `workspace-write` 下已记录的会话工作区和显式额外目录。它不枚举已挂载能力；工具插件保留特定于操作的拒绝与升权引导，批准策略单独贡献给同一份快照，计划引导仍由 `dsh-plan-mode` 的系统段落管理。
+`sandbox:policy` 贡献说明该模式与具体能力无关的文件操作约定，以及 `workspace-write` 下每个保留的工作区目录和显式部署授权。多文件夹 Session 还会收到必需的 `sandbox:workspace-folders` 上下文，即使可选运行时上下文被禁用也会列出目录。相对路径仍按当前工作目录解析。它不枚举已挂载能力；工具插件保留特定于操作的拒绝与升权引导，批准策略单独贡献给同一份快照，计划引导仍由 `dsh-plan-mode` 的系统段落管理。
 
 ### 源码地图
 
@@ -88,6 +88,7 @@ kind: "package-reference"
 |---|---|
 | [`src/index.ts`](src/index.ts) | 插件入口：`SandboxPolicyService`、`Config` schema、策略解析与上下文贡献 |
 | [`src/session-mode.ts`](src/session-mode.ts) | `sandbox/mode` 事件、其 fold 与写入路径 |
+| [`src/workspace-roots.ts`](src/workspace-roots.ts) | 其他工作区目录的事件与写入路径 |
 
 </details>
 
@@ -131,6 +132,18 @@ Current DSH file policy: workspace-write. Any available operation enforced by th
 Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: "<workspace root>". Additional writable directories: ["/repo/.git"]. Some platform temporary areas may also be writable.
 ```
 
+##### 多文件夹工作区写入
+
+```markdown
+Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under these session workspace folders: ["<first write root>","<additional folder>"]. Some platform temporary areas may also be writable.
+```
+
+多文件夹 Session 在每种模式下还会收到以下必需上下文，包括可选运行时上下文被禁用时：
+
+```markdown
+Session workspace folders: ["<session cwd>","<additional folder>"]. Relative paths and commands use the current working directory; use absolute paths for the other folders.
+```
+
 ##### 完全访问
 
 ```markdown
@@ -139,7 +152,7 @@ Current DSH file policy: danger-full-access. The DSH file sandbox does not restr
 
 #### Token 影响
 
-首次请求和有效策略每次变化时增加一条简洁的持久上下文消息；未变化的请求不增加内容。`workspace-write` 携带已记录的会话工作区路径以及显式指定的额外目录；平台特定的临时路径会以摘要表述，不会加入依赖主机的字节。
+首次请求和有效策略每次变化时增加一条简洁的持久上下文消息；未变化的请求不增加内容。`workspace-write` 携带保留的工作区路径和显式部署授权；平台特定的临时路径会以摘要表述，不会加入依赖主机的字节。
 
 #### KV Cache 影响
 
@@ -152,7 +165,8 @@ Current DSH file policy: danger-full-access. The DSH file sandbox does not restr
 
 这些限制界定了本包提供的策略范围。它们是当前的包级约束，并非通用沙箱对比，也不是待办事项清单。
 
-- **部署级额外授权**——额外目录来自配置，而非逐会话权限设置。后端支持情况见 [sandbox-local](../sandbox-local/README.zh.md)。
+- **部署级额外授权**——`additionalWritableRoots` 来自配置，与 Session 自有的工作区文件夹无关，并非逐会话权限设置。后端支持情况见 [sandbox-local](../sandbox-local/README.zh.md)。
+- **文件夹权限属于各自的 Session**——编辑工作区注册只影响新对话。已有 Session 保留已记录的目录权限。
 - **仅限文件操作模式**——`SandboxMode` 管控文件操作；网络和进程策略不在其词汇中，因此这里没有限制它们的旋钮。
 - **有意概述临时区域**——强制执行后端会授予不同的平台临时区域，这些区域在策略解析后才会选定，因此无法在当前上下文中如实枚举。
 

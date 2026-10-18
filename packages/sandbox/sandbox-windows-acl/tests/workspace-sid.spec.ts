@@ -16,7 +16,29 @@ describe('workspaceWriteSid', () => {
     const first = workspaceWriteSid('C:\\Users\\agent\\repo')
     const second = workspaceWriteSid('C:\\Users\\agent\\repo')
     expect(first).toBe(second)
+    expect(first).toBe('S-1-4-907248133-152761708')
     expect(first).toMatch(/^S-1-4-\d+-\d+$/u)
+  })
+
+  it('keeps the single-root identity when an array contains only that canonical root', () => {
+    const root = 'C:\\Users\\agent\\repo'
+    expect(workspaceWriteSid([root])).toBe(workspaceWriteSid(root))
+    expect(workspaceWriteSid([root, root])).toBe(workspaceWriteSid(root))
+  })
+
+  it('derives a stable identity for the sorted deduplicated root set, not its primary root', () => {
+    const first = 'C:\\work-a'
+    const second = 'D:\\work-b'
+    const sid = workspaceWriteSid([first, second])
+    expect(sid).toMatch(/^S-1-4-\d+-\d+$/u)
+    expect(sid).toBe(workspaceWriteSid([second, first, second]))
+    expect(sid).not.toBe(workspaceWriteSid(first))
+    expect(sid).not.toBe(workspaceWriteSid(second))
+    expect(sid).not.toBe(workspaceWriteSid([first, 'D:\\work-c']))
+  })
+
+  it('rejects an empty workspace set', () => {
+    expect(() => workspaceWriteSid([])).toThrow('requires at least one workspace root')
   })
 
   it('derives distinct identities for distinct workspaces', () => {

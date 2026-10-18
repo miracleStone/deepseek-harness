@@ -1,0 +1,62 @@
+{
+  "finalResponse": "MAIN_RESPONSE",
+  "workspaceRootsEvents": [
+    {
+      "type": "sandbox/workspace-roots",
+      "seq": 3,
+      "time": 0,
+      "data": {
+        "additionalWorkspaceRoots": [
+          "/projects/library",
+          "/projects/tools"
+        ]
+      }
+    },
+    {
+      "type": "sandbox/workspace-roots",
+      "seq": 4,
+      "time": 0,
+      "data": {
+        "additionalWorkspaceRoots": []
+      }
+    }
+  ],
+  "workspaceRootsNotifications": [
+    {
+      "method": "session.event",
+      "event": {
+        "type": "sandbox/workspace-roots",
+        "seq": 3,
+        "time": 0,
+        "data": {
+          "additionalWorkspaceRoots": [
+            "/projects/library",
+            "/projects/tools"
+          ]
+        }
+      }
+    },
+    {
+      "method": "session.event",
+      "event": {
+        "type": "sandbox/workspace-roots",
+        "seq": 4,
+        "time": 0,
+        "data": {
+          "additionalWorkspaceRoots": []
+        }
+      }
+    }
+  ],
+  "eventOrder": [
+    "agent/inbox/spliced",
+    "turn/start",
+    "assistant/message",
+    "sandbox/workspace-roots",
+    "sandbox/workspace-roots",
+    "turn/end"
+  ],
+  "assistantTexts": [
+    "MAIN_RESPONSE"
+  ]
+}

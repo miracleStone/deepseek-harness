@@ -125,6 +125,30 @@ export class ClientWorkspaceModel implements WorkspaceFollowSink {
   }
 
   /**
+   * Add an extra directory and merge the authoritative row after success.
+   * @param workspaceId - target Workspace.
+   * @param path - fully qualified existing Host directory.
+   * @returns generated Remote result; a failure leaves the projection unchanged.
+   */
+  async addFolder(workspaceId: WorkspaceId, path: string): Promise<RemoteResult<WorkspaceValue>> {
+    const result = await this.remote.addFolder({ workspaceId, path })
+    if (result.ok) this.upsert(result.value.workspace)
+    return result
+  }
+
+  /**
+   * Remove an extra directory and merge the authoritative row after success.
+   * @param workspaceId - target Workspace.
+   * @param path - extra canonical Host directory, which may no longer exist.
+   * @returns generated Remote result; a failure leaves the projection unchanged.
+   */
+  async removeFolder(workspaceId: WorkspaceId, path: string): Promise<RemoteResult<WorkspaceValue>> {
+    const result = await this.remote.removeFolder({ workspaceId, path })
+    if (result.ok) this.upsert(result.value.workspace)
+    return result
+  }
+
+  /**
    * Delete a Workspace and remove it from the local projection immediately.
    * @param workspaceId - target Workspace.
    * @returns generated Remote result.

@@ -828,7 +828,7 @@ export class SubagentManager {
             child.session.append('agent-preset/selected', { agentPreset: inputs.composition.agentPreset })
           }
           child.session.append('subagent/descriptor', create.descriptor)
-          appendDelegatedPolicyOverrides(child.session, create.delegatedPolicies)
+          appendDelegatedPolicyOverrides(child.session, create.delegatedPolicies, childCtx.get('sandboxPolicy'))
           const workingDirectory = childCtx.get('workingDirectory')
           if (workingDirectory === undefined) throw new Error('local subagents require the working-directory service')
           await workingDirectory.set(child, create.cwd, inputs.signal)

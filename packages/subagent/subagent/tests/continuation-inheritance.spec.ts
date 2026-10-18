@@ -16,7 +16,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import AgentLoop from '@deepseek-ai/dsh-agent-loop'
 import { mountAgentLoopTestDependencies } from '@deepseek-ai/dsh-agent-loop-testkit'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import SandboxPolicyService, { setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
+import SandboxPolicyService, { setSandboxMode, setSandboxWorkspaceRoots } from '@deepseek-ai/dsh-sandbox-policy'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
@@ -88,6 +88,39 @@ function foldedApprovalPolicy(ctx: Context, id: SessionId, events: readonly Sess
 }
 
 describe('continuable policy inheritance', () => {
+  it('captures additional workspace folders before child creation and restores them on cold resume', async () => {
+    const { ctx, parent } = await setup([textResponse('first'), textResponse('continued')])
+    const original = join(tmpdir(), 'delegated-workspace-folder')
+    const later = join(tmpdir(), 'later-workspace-folder')
+    setSandboxWorkspaceRoots(parent.session, [original])
+    const starting = ctx.subagents.startActivation({ ...startSpec(parent), delivery: 'parent' })
+    setSandboxWorkspaceRoots(parent.session, [later])
+    const started = await starting
+    await waitNoActivation(ctx, started.childId)
+    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    expect(ctx.sandboxPolicy.additionalRootsOf(Session.create(started.childId, loaded.events))).toEqual([original])
+    expect(ctx.sandboxPolicy.additionalRootsOf(parent.session)).toEqual([later])
+    await queueHostSubagentPrompt(
+      ctx.subagents, parent, started.childId,
+      [{ type: 'text', text: 'continue' }], { kind: 'user' }, new AbortController().signal,
+    )
+    await waitNoActivation(ctx, started.childId)
+    const resumed = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    expect(ctx.sandboxPolicy.additionalRootsOf(Session.create(started.childId, resumed.events))).toEqual([original])
+  })
+
+  it('clears additional folder grants inherited from an older fork prefix', async () => {
+    const { ctx, parent } = await setup([textResponse('parent'), textResponse('fork child')])
+    setSandboxWorkspaceRoots(parent.session, [join(tmpdir(), 'previous-folder')])
+    parent.followup(createUserMessage({ content: [{ type: 'text', text: 'parent work' }], source: { kind: 'user' } }))
+    await parent.whenIdle()
+    setSandboxWorkspaceRoots(parent.session, [])
+    const started = await ctx.subagents.startActivation({ ...startSpec(parent, 'fork'), delivery: 'parent' })
+    await waitNoActivation(ctx, started.childId)
+    const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
+    expect(ctx.sandboxPolicy.additionalRootsOf(Session.create(started.childId, loaded.events))).toEqual([])
+  })
+
   it.each(['auto', 'danger-full-access'] as const)(
     'persists the delegated %s identity across cold resume without reading the parent again',
     { timeout: 20_000 },

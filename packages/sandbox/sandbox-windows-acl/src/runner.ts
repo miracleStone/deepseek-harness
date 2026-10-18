@@ -8,15 +8,15 @@
  *
  * Stable argv contract (the seam builds it; a native-exe replacement would
  * keep the same contract):
- *   [node, runner.js, '--workspace', <dir>, '--temp', <dir>,
+ *   [node, runner.js, '--workspace', <dir>, ['--workspace', <dir>, ...], '--temp', <dir>,
  *    '--mode', <read-only|workspace-write>,
  *    ['--write-sid', <S-1-4-…>,
  *     '--temp-write-sid', <S-1-4-…>], '--', <argv...>]
  *
  * Modes:
- *  - workspace-write: the workspace and temp directories carry distinct
- *    capability-SID Write grants; other ACL-addressable writes are denied
- *    except for the documented Everyone and hard-link boundaries.
+ *  - workspace-write: the named workspace roots share one capability-SID Write
+ *    grant; the private temp directory carries a distinct capability. Other
+ *    ACL-addressable writes are denied except for the documented boundaries.
  *  - read-only: no capability-SID grants; the restricting list carries no
  *    capability SID, so a standing grant ACE from an earlier
  *    workspace-write period stays inert. BOTH modes drop Authenticated Users
@@ -27,7 +27,8 @@
  * `--write-sid` + `--temp-write-sid`: the seam's grant contract — the
  * CALLER has already materialized distinct workspace and private-temp ACEs
  * and owns their revocation, so the runner neither grants nor revokes
- * (`manageDacls: false`). Both values are checked against their owning paths.
+ * (`manageDacls: false`). The workspace SID must match the canonical root set;
+ * the temp SID must match its directory.
  * Without the pair (standalone/agentless use), workspace-write treats
  * `--temp` as a ROOT, creates a random private child directory, derives its
  * own temp SID, and removes that directory after the child exits. In both
@@ -45,8 +46,8 @@
  */
 
 import { SUBPROCESS_CONTROL_ENV, SUBPROCESS_CONTROL_FD } from '@deepseek-ai/dsh-subprocess/control'
-import { closeSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { closeSync, existsSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { isAbsolute, join } from 'node:path'
 
 import { win32 } from './ffi.ts'
 import { AclSandbox, assertTempRootOutsideWorkspace } from './index.ts'
@@ -64,7 +65,7 @@ function fail(detail: string): never {
 }
 
 interface ParsedArgs {
-  workspace: string
+  workspaces: string[]
   temp: string
   mode: 'read-only' | 'workspace-write'
   writeSid: string | undefined
@@ -74,7 +75,7 @@ interface ParsedArgs {
 }
 
 function parseArgs(raw: string[]): ParsedArgs {
-  let workspace: string | undefined
+  const workspaces: string[] = []
   let temp: string | undefined
   let mode: string | undefined
   let writeSid: string | undefined
@@ -90,7 +91,7 @@ function parseArgs(raw: string[]): ParsedArgs {
     const value = raw[index]
     if (value === undefined) fail(`missing value after ${token}`)
     switch (token) {
-      case '--workspace': workspace = value; break
+      case '--workspace': workspaces.push(value); break
       case '--temp': temp = value; break
       case '--mode': mode = value; break
       case '--write-sid': writeSid = value; break
@@ -98,13 +99,13 @@ function parseArgs(raw: string[]): ParsedArgs {
       default: fail(`unknown argument: ${token}`)
     }
   }
-  if (workspace === undefined) fail('missing --workspace')
+  if (workspaces.length === 0) fail('missing --workspace')
   if (temp === undefined) fail('missing --temp')
   if (mode !== 'read-only' && mode !== 'workspace-write') fail(`unknown mode: ${String(mode)}`)
   const argv = raw.slice(index)
   const command = argv[0]
   if (command === undefined) fail('missing command after --')
-  return { workspace, temp, mode, writeSid, tempWriteSid: parsedTempWriteSid, command, args: argv.slice(1) }
+  return { workspaces, temp, mode, writeSid, tempWriteSid: parsedTempWriteSid, command, args: argv.slice(1) }
 }
 
 function requireDirectory(label: string, path: string): void {
@@ -115,9 +116,14 @@ function requireDirectory(label: string, path: string): void {
 
 async function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2))
-  // Both directories are validated in both modes: a provider bug that passes
-  // a bogus root must fail loudly at the runner boundary, never mid-child.
-  requireDirectory('--workspace', parsed.workspace)
+  // Validate every root before native setup or ACL mutation, including read-only.
+  const workspaceRoots = [...new Set(parsed.workspaces.map((root) => {
+    if (!isAbsolute(root) || (process.platform === 'win32' && /^[\\/](?![\\/])/u.test(root))) {
+      fail(`--workspace must be absolute: ${root}`)
+    }
+    requireDirectory('--workspace', root)
+    return realpathSync.native(root)
+  }))]
   requireDirectory('--temp', parsed.temp)
 
   const seamManaged = parsed.writeSid !== undefined || parsed.tempWriteSid !== undefined
@@ -128,7 +134,7 @@ async function main(): Promise<number> {
     fail('workspace-write requires --write-sid and --temp-write-sid together')
   }
   if (parsed.mode === 'workspace-write') {
-    assertTempRootOutsideWorkspace(parsed.workspace, parsed.temp)
+    for (const root of workspaceRoots) assertTempRootOutsideWorkspace(root, parsed.temp)
   }
 
   const api = await win32()
@@ -147,7 +153,7 @@ async function main(): Promise<number> {
     let writeSid: string | undefined
     let privateTempSid: string | undefined
     if (parsed.mode === 'workspace-write') {
-      writeSid = workspaceWriteSid(parsed.workspace)
+      writeSid = workspaceWriteSid(workspaceRoots)
       if (seamManaged) {
         if (parsed.writeSid !== writeSid) fail('--write-sid does not match --workspace')
         privateTempDir = parsed.temp
@@ -160,7 +166,7 @@ async function main(): Promise<number> {
       }
     }
     sandbox = new AclSandbox({
-      writableDirs: parsed.mode === 'workspace-write' ? [parsed.workspace] : [],
+      writableDirs: parsed.mode === 'workspace-write' ? workspaceRoots : [],
       tempDir: privateTempDir,
       mode: parsed.mode,
       ...writeSid === undefined ? {} : { writeSid },

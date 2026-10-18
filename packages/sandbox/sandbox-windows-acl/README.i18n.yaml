@@ -9,8 +9,8 @@
   en: e7cdbd2652fe80ab
   zh: 04e1d187313a0bd5
 /deepseek-ai-dsh-sandbox-windows-acl/summary:
-  en: 777921135c23ee55
-  zh: 7c726cc63995d443
+  en: 379ca9ee4a85ecc5
+  zh: ad3d62ac39cb143c
 /deepseek-ai-dsh-sandbox-windows-acl/table-of-contents:
   en: d152484eb41ac6b4
   zh: 09388d293f9be9cb
@@ -21,11 +21,11 @@
   en: 510d0b1ef7db159d
   zh: dc2cf25b3db14c63
 /deepseek-ai-dsh-sandbox-windows-acl/use-this-package/direct-api:
-  en: 16596607bbccc2a3
-  zh: 30bc370a5281bf0d
+  en: a1297b79b6353833
+  zh: 3d954b0d41c7c9a8
 /deepseek-ai-dsh-sandbox-windows-acl/use-this-package/what-confinement-gives-you:
-  en: 289e65bddf20dd79
-  zh: 7ff72ed64c4b4d1c
+  en: 8021ad505a0a7a4d
+  zh: 71b8cf1298c1ecf8
 /deepseek-ai-dsh-sandbox-windows-acl/use-this-package/failures-and-recovery:
   en: 7fc0707debb1e67c
   zh: e3b5529bf82f868e
@@ -33,17 +33,17 @@
   en: c2cde86c85c2c619
   zh: a29a114e591f9d3f
 /deepseek-ai-dsh-sandbox-windows-acl/understand-the-implementation/mechanism:
-  en: a37ea37f2d527693
-  zh: 749b5a263d0e1534
+  en: 9131e4aeadf9d34e
+  zh: 6a7fd0d827008169
 /deepseek-ai-dsh-sandbox-windows-acl/understand-the-implementation/modes-and-token-lists:
-  en: 9c8d9af84f9abd99
-  zh: 1c82b355aa5f210f
+  en: 787edd6f28766701
+  zh: 09365c9203e8a823
 /deepseek-ai-dsh-sandbox-windows-acl/understand-the-implementation/the-confinement-runner:
-  en: 0847de0e53e50061
-  zh: 90fa3dcaf080c3be
+  en: 915bb8e24e070a45
+  zh: c5811eb7225d8c30
 /deepseek-ai-dsh-sandbox-windows-acl/understand-the-implementation/verified-boundaries:
-  en: ad02570eae90037f
-  zh: fd78c2318de18dda
+  en: d3556cf7accdfec4
+  zh: b039961c706526f0
 /deepseek-ai-dsh-sandbox-windows-acl/understand-the-implementation/header-verification-and-source-map:
   en: c19df6b7a756b779
   zh: b8267b26bd191d97
@@ -57,8 +57,8 @@
   en: 817eb1b7de13872e
   zh: 06fe175e41e7459b
 /deepseek-ai-dsh-sandbox-windows-acl/known-limitations-and-deferred-work:
-  en: 046831a864786b2a
-  zh: 4a261fbab3396ea4
+  en: 3ecc186bdbd39cbf
+  zh: 9ceee26bb0013a82
 /deepseek-ai-dsh-sandbox-windows-acl/known-limitations-and-deferred-work/dev-note:
   en: cc273320f6a1beaf
   zh: 5c57a312ddc50651

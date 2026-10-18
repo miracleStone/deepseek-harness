@@ -50,9 +50,14 @@
 }
 
 @media (hover: hover) {
-  .iconButton:hover {
+  .iconButton:hover:not(:disabled) {
     background: var(--dsw-alias-interactive-bg-hover);
   }
+}
+
+.iconButton:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 /* View-options dropdown card: labels are short, so a content-sized card reads

@@ -5,7 +5,7 @@
  * additional set stays one shared derivation across backend dialects.
  */
 
-import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -40,16 +40,41 @@ describe('workspaceWritableRoots', () => {
     const ws = mkdtempSync(join(tmpdir(), 'dsh-ws-'))
     const extra = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-extra-')))
     const alias = join(ws, 'alias')
-    symlinkSync(extra, alias, 'dir')
+    symlinkSync(extra, alias, process.platform === 'win32' ? 'junction' : 'dir')
     roots.push(ws, extra)
-    const grants = workspaceWritableRoots({
-      mode: 'workspace-write',
-      workspaceRoot: ws,
-      additionalWritableRoots: [extra, extra],
-    })
-    expect(grants).toEqual([realpathSync.native(ws), realpathSync.native(extra)])
-    expect(() => workspaceWritableRoots({ mode: 'workspace-write', workspaceRoot: ws, additionalWritableRoots: [alias] }))
-      .toThrow('use the physical directory path')
+    try {
+      const grants = workspaceWritableRoots({
+        mode: 'workspace-write',
+        workspaceRoot: ws,
+        additionalWritableRoots: [extra, extra],
+      })
+      expect(grants).toEqual([realpathSync.native(ws), realpathSync.native(extra)])
+      expect(() => workspaceWritableRoots({ mode: 'workspace-write', workspaceRoot: ws, additionalWritableRoots: [alias] }))
+        .toThrow('use the physical directory path')
+    } finally {
+      unlinkSync(alias)
+    }
+  })
+
+  it('combines both grant sources without bypassing physical-directory validation', () => {
+    const ws = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-ws-')))
+    const extra = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-extra-')))
+    const deployed = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-deployed-')))
+    roots.push(ws, extra, deployed)
+    const alias = join(ws, 'alias')
+    symlinkSync(extra, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    try {
+      const policy = {
+        mode: 'workspace-write' as const, workspaceRoot: ws,
+        additionalWorkspaceRoots: [alias, extra], additionalWritableRoots: [extra, deployed],
+      }
+      expect(workspaceWritableRoots(policy)).toEqual([ws, extra, deployed])
+      expect(() => workspaceWritableRoots({ ...policy, additionalWritableRoots: [alias] }))
+        .toThrow('use the physical directory path')
+      expect(workspaceWritableRoots({ ...policy, mode: 'read-only' })).toEqual([])
+    } finally {
+      unlinkSync(alias)
+    }
   })
 
   it('rejects missing and non-directory extra roots before granting access', () => {
@@ -70,8 +95,24 @@ describe('workspaceWritableRoots', () => {
 })
 
 describe('writableRoots', () => {
-  it('read-only grants nothing', () => {
-    expect(writableRoots({ mode: 'read-only', workspaceRoot: process.cwd() })).toEqual([])
+  it.each(['read-only', 'danger-full-access'] as const)('%s grants no writable roots, including extras', (mode) => {
+    expect(writableRoots({ mode, workspaceRoot: process.cwd(), additionalWorkspaceRoots: [tmpdir()] })).toEqual([])
+  })
+
+  it('grants additional workspace roots once after canonicalizing aliases', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'dsh-ws-'))
+    const extra = mkdtempSync(join(tmpdir(), 'dsh-extra-ws-'))
+    roots.push(ws, extra)
+    const alias = join(ws, 'alias')
+    symlinkSync(extra, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    try {
+      const writable = writableRoots({
+        mode: 'workspace-write', workspaceRoot: ws, additionalWorkspaceRoots: [extra, alias, ws, extra],
+      })
+      expect(writable).toEqual([...new Set([ws, extra, '/tmp', tmpdir()].map(canonicalPath))])
+    } finally {
+      unlinkSync(alias)
+    }
   })
 
   it('workspace-write grants the workspace root plus the platform temp areas, canonical and deduplicated', () => {

@@ -8,13 +8,13 @@ Source: [`packages/sandbox/sandbox/src/index.ts`](../../packages/sandbox/sandbox
 
 ## Modes and enforcement
 
-`SandboxMode` governs filesystem effects only. `read-only` asks the backend to deny writes — the POSIX runners additionally grant the `/dev/null` sink their shells require, while the Windows ACL runner grants no explicit writable root and reports partial enforcement for its ambient ACL gaps; `workspace-write` permits writes under the workspace root, explicit extra directories, and the backend's promised temp area; `danger-full-access` bypasses confinement. Network and process visibility are outside this vocabulary.
+`SandboxMode` governs filesystem effects only. `read-only` asks the backend to deny writes — the POSIX runners additionally grant the `/dev/null` sink their shells require, while the Windows ACL runner grants no explicit writable root and reports partial enforcement for its ambient ACL gaps; `workspace-write` permits writes under the workspace roots, explicit extra directories, and the backend's promised temp area; `danger-full-access` bypasses confinement. Network and process visibility are outside this vocabulary.
 
 ```ts type-equiv
 /**
  * File-effect policy for confined processes. `read-only` permits only required
- * sinks such as `/dev/null`; `workspace-write` also permits the workspace,
- * explicit extra roots, and backend-defined temp areas; `danger-full-access` bypasses confinement. Network
+ * sinks such as `/dev/null`; `workspace-write` also permits the workspace roots,
+ * explicit extra directories, and backend-defined temp areas; `danger-full-access` bypasses confinement. Network
  * and process visibility are outside this vocabulary.
  */
 type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access'
@@ -38,20 +38,21 @@ Enforcement is a reported fact. `full` means the backend governs every file effe
 type SandboxEnforcement = 'full' | 'partial'
 ```
 
+<a id="per-call-policy"></a>
 ## Per-call policy
 
-The complete execution policy is resolved and carried per capability call. It includes `danger-full-access` so a consumer can resolve policy once before deciding whether to bypass confinement. Normal tool calls derive `workspaceRoot` from the calling session's immutable cwd; deployment configuration supplies the agentless fallback and explicit additional write grants. The resolver preserves absolute execution-world spelling. Enforcing providers canonicalize the root where the files exist, so a cwd containing `symlink/..` identifies the directory where the paired subprocess provider actually runs.
+The complete execution policy is resolved and carried per capability call. It includes `danger-full-access` so a consumer can resolve policy once before deciding whether to bypass confinement. Normal tool calls derive `workspaceRoot` from the calling Session's immutable cwd and `additionalWorkspaceRoots` from its logged folder snapshot; deployment configuration supplies the agentless fallback and separate explicit `additionalWritableRoots` grants. Workspace registration edits affect newly created conversations, not existing Session grants. For canonical multi-folder Session roots, the resolver removes nested directories before filesystem resolution and chooses the first retained write root, which may be an approved parent of the Session cwd. The resolver preserves absolute execution-world spelling. Enforcing providers canonicalize the root where the files exist, so a cwd containing `symlink/..` identifies the directory where the paired subprocess provider actually runs.
 
 ```ts type-equiv
 /**
- * The complete file-effect policy resolved for one capability call. The root
- * is carried even under modes that do not consume it so callers can resolve
+ * The complete file-effect policy resolved for one capability call. Workspace roots
+ * are carried even under modes that do not consume them so callers can resolve
  * policy once before choosing the enforcement path.
  */
 interface SandboxExecutionPolicy {
   /** The file-effect mode this execution runs under. */
   mode: SandboxMode
-  /** Absolute root directory `workspace-write` may write under. */
+  /** First approved absolute write root; a containing folder can cover the Session's cwd. */
   workspaceRoot: string
   /**
    * Extra physical absolute directories `workspace-write` may also write under.
@@ -61,10 +62,16 @@ interface SandboxExecutionPolicy {
    */
   additionalWritableRoots?: readonly string[]
   /**
+   * Additional absolute workspace directories writable under `workspace-write`.
+   * Omitted means only the primary workspace; `read-only` grants none of these
+   * roots, and `danger-full-access` bypasses confinement regardless of roots.
+   */
+  additionalWorkspaceRoots?: readonly string[]
+  /**
    * Opaque identity of the calling session (the branded `dsh-session`
    * SessionId). Backends key per-session state off it (e.g. windows-acl gives
-   * each live session/workspace pair a random private temp directory and SID,
-   * while the workspace SID and standing grant remain per-workspace); absent
+   * each live session/workspace-root set a random private temp directory and SID,
+   * while the workspace SID and standing grants remain per-root set); absent
    * for agentless calls, which fall back to per-call backend state.
    */
   sessionId?: SessionId
@@ -76,7 +83,7 @@ interface SandboxExecutionPolicy {
 ```ts type-equiv
 /** Inputs that select the sandbox policy for one capability call. */
 interface SandboxPolicyRequest {
-  /** Calling session; its immutable cwd becomes the workspace boundary. */
+  /** Calling Session; its cwd and recorded folders supply the approved write roots. */
   session?: Session
   /** Explicit approved mode override, which outranks session policy. */
   mode?: SandboxMode
@@ -206,13 +213,33 @@ The sandbox-policy service (`ctx.sandboxPolicy`). Owns the deployment default mo
 /**
  * Resolve the complete policy for one capability call. An approved explicit
  * mode outranks the session's last `sandbox/mode` event, which outranks the
- * deployment default. A session cwd is its workspace-write boundary; the
- * configured root is the fallback for agentless calls and sessions without a
- * cwd.
+ * deployment default. The Session's immutable cwd and recorded additional
+ * roots delimit workspace-write access. Multi-folder Sessions use their
+ * canonical approved roots with lexically redundant descendants removed before
+ * filesystem resolution; cwd may be nested inside the first retained write
+ * root. Configured additional writable directories remain separate deployment
+ * grants. The configured root is the fallback for agentless calls and Sessions
+ * without a cwd.
  * @param request - optional session and approved mode override.
- * @returns the fully resolved per-call mode and absolute workspace root.
+ * @returns the fully resolved per-call mode and absolute workspace roots.
  */
 resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy
+
+/**
+ * Read additional approved directories from the Session log without filesystem I/O.
+ * @param session - Session whose approved directories are requested.
+ * @returns additional roots in recorded order, or an empty list without a record.
+ */
+additionalRootsOf(session: Session): readonly string[]
+
+/**
+ * Record canonical approved roots during new Session setup, including after
+ * the Session has been announced. Callers supply filesystem-canonical primary cwd
+ * and extra roots from approval; later grant reduction performs no filesystem lookup.
+ * @param session - writable Session receiving its directory permissions.
+ * @param roots - canonical absolute approved directories; empty means no extra roots.
+ */
+initializeWorkspaceRoots(session: Session, roots: readonly string[]): void
 
 /**
  * Read the session override without applying the deployment default.

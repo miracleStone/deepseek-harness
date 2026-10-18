@@ -13,7 +13,9 @@ import type { SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type { WorkspaceRecord } from './spec.ts'
 import type { Workspace, WorkspaceId } from './types.ts'
-import { realpathNormalize } from './paths.ts'
+import {
+  existingWorkspaceFolder, realpathNormalize, removedWorkspaceFolder, WorkspacePrimaryFolderError,
+} from './paths.ts'
 
 /** An insertSessionBefore request named a session or anchor not on the account (storage failures stay plain errors). */
 export class WorkspaceMoveInvalidError extends Error {
@@ -37,6 +39,13 @@ export interface WorkspaceEntityHost {
    * @returns the table; throws while the registry has not started yet.
    */
   table(): KvTable<WorkspaceId, WorkspaceRecord>
+
+  /**
+   * Serialize validation and commit with every registry and entity mutation.
+   * @param mutation - Validation and durable update to run at one queue slot.
+   * @returns the mutation's durable result.
+   */
+  enqueueMutation<T>(mutation: () => Promise<T>): Promise<T>
 
   /**
    * Validate an already-accounted session, preserving ownership when its fully
@@ -87,6 +96,10 @@ export class WorkspaceEntity implements Workspace {
     return this.record.path
   }
 
+  get additionalPaths(): readonly string[] {
+    return this.record.additionalPaths ?? []
+  }
+
   get title(): string {
     return this.record.title
   }
@@ -105,6 +118,28 @@ export class WorkspaceEntity implements Workspace {
 
   async setTitle(title: string): Promise<void> {
     await this.mutate(record => ({ ...record, title }))
+  }
+
+  async addFolder(path: string): Promise<void> {
+    let canonical: string
+    await this.mutate((record) => {
+      const additionalPaths = record.additionalPaths ?? []
+      return canonical === record.path || additionalPaths.includes(canonical)
+        ? record
+        : { ...record, additionalPaths: [...additionalPaths, canonical] }
+    }, async () => { canonical = await existingWorkspaceFolder(path) })
+  }
+
+  async removeFolder(path: string): Promise<void> {
+    let canonical: string
+    await this.mutate((record) => {
+      if (canonical === record.path) throw new WorkspacePrimaryFolderError(path)
+      const additionalPaths = record.additionalPaths ?? []
+      if (!additionalPaths.includes(canonical)) return record
+      return { ...record, additionalPaths: additionalPaths.filter(folder => folder !== canonical) }
+    }, async () => {
+      canonical = await removedWorkspaceFolder(path, [this.record.path, ...this.additionalPaths])
+    })
   }
 
   async attachSession(sessionId: SessionId): Promise<void> {
@@ -189,10 +224,10 @@ export class WorkspaceEntity implements Workspace {
   }
 
   /**
-   * The single write path: run `fn` on the domain write chain via
-   * `table.update`, stamping `updatedAt` and pruning candidates that no
-   * longer pass the candidate membership check, then swap the
-   * snapshot.
+   * The single write path: optional asynchronous validation runs at the
+   * registry mutation slot before `fn` runs through `table.update`, stamping
+   * `updatedAt` and pruning candidates that no longer pass the candidate
+   * membership check, then swapping the snapshot.
    *
    * `fn` sees the value current at its chain slot, so membership decisions
    * (attach/detach idempotence) are race-free against queued writes; a fn
@@ -200,23 +235,29 @@ export class WorkspaceEntity implements Workspace {
    * through the sentinel when pruning also finds nothing, so a no-op neither
    * rewrites the medium nor emits a change event.
    */
-  private async mutate(fn: (record: WorkspaceRecord) => WorkspaceRecord): Promise<void> {
-    let next: WorkspaceRecord
-    try {
-      next = await this.host.table().update(this.id, (current) => {
-        const changed = fn(current)
-        const sessionIds = changed.sessionIds.filter(
-          id => this.host.candidateMatches(id, changed.path),
-        )
-        if (changed === current && sessionIds.length === current.sessionIds.length) {
-          throw unchangedSentinel
-        }
-        return { ...changed, sessionIds, updatedAt: new Date().toISOString() }
-      })
-    } catch (error) {
-      if (error === unchangedSentinel) return
-      throw error
-    }
-    this.record = next
+  private mutate(
+    fn: (record: WorkspaceRecord) => WorkspaceRecord,
+    validate?: () => Promise<void>,
+  ): Promise<void> {
+    return this.host.enqueueMutation(async () => {
+      if (validate !== undefined) await validate()
+      let next: WorkspaceRecord
+      try {
+        next = await this.host.table().update(this.id, (current) => {
+          const changed = fn(current)
+          const sessionIds = changed.sessionIds.filter(
+            id => this.host.candidateMatches(id, changed.path),
+          )
+          if (changed === current && sessionIds.length === current.sessionIds.length) {
+            throw unchangedSentinel
+          }
+          return { ...changed, sessionIds, updatedAt: new Date().toISOString() }
+        })
+      } catch (error) {
+        if (error === unchangedSentinel) return
+        throw error
+      }
+      this.record = next
+    })
   }
 }

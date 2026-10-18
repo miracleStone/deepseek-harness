@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 
 const css = readFileSync(fileURLToPath(new URL('../src/client/rows/WorkspaceBrowser.module.css', import.meta.url)), 'utf8')
 const rowsCss = readFileSync(fileURLToPath(new URL('../src/client/rows/Rows.module.css', import.meta.url)), 'utf8')
+const foldersCss = readFileSync(fileURLToPath(new URL('../src/client/WorkspaceFolders.module.css', import.meta.url)), 'utf8')
 
 /**
  * Declarations of one selector rule, keyed by property with whitespace collapsed.
@@ -32,6 +33,27 @@ function declarationsFrom(source: string, selector: string): Map<string, string>
 
 const declarations = (selector: string): Map<string, string> | undefined => declarationsFrom(css, selector)
 const rowDeclarations = (selector: string): Map<string, string> | undefined => declarationsFrom(rowsCss, selector)
+
+describe('WorkspaceFolders.module.css', () => {
+  it('fits narrow viewports and keeps complete paths readable without truncation', () => {
+    expect(declarationsFrom(foldersCss, '.dialog')?.get('width')).toBe('min(520px, 100%)')
+    expect(declarationsFrom(foldersCss, '.dialog')?.get('max-height')).toBe('100%')
+    expect(declarationsFrom(foldersCss, '.content')?.get('overflow-y')).toBe('auto')
+    expect(declarationsFrom(foldersCss, '.folder')?.get('min-width')).toBe('0')
+    expect(declarationsFrom(foldersCss, '.path')?.get('overflow-wrap')).toBe('anywhere')
+    expect(declarationsFrom(foldersCss, '.path')?.get('white-space')).toBe('pre-wrap')
+    expect(declarationsFrom(foldersCss, '.path')?.get('text-overflow')).toBeUndefined()
+    expect(declarationsFrom(foldersCss, '.actions')?.get('flex-wrap')).toBe('wrap')
+  })
+
+  it('uses theme-owned light and dark text colors', () => {
+    for (const selector of ['.path', '.primary', '.notice', '.status', '.workspaceName']) {
+      expect(declarationsFrom(foldersCss, selector)?.get('color')).toMatch(/^var\(--dsw-alias-label-/)
+    }
+    expect(foldersCss).not.toMatch(/#[\da-f]{3,8}\b|rgba?\(|data-theme/iu)
+    expect(foldersCss).not.toMatch(/font-weight:\s*[6-9]00/)
+  })
+})
 
 describe('WorkspaceBrowser.module.css list', () => {
   it('hides touch timestamps without hiding pending-interaction labels', () => {

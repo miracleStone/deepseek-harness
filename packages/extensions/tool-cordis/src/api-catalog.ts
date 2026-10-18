@@ -2579,9 +2579,20 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy',
-        description: 'Resolve the complete policy for one capability call. An approved explicit mode outranks the session\'s last `sandbox/mode` event, which outranks the deployment default. A session cwd is its workspace-write boundary; the configured root is the fallback for agentless calls and sessions without a cwd.',
+        description: 'Resolve the complete policy for one capability call. An approved explicit mode outranks the session\'s last `sandbox/mode` event, which outranks the deployment default. The Session\'s immutable cwd and recorded additional roots delimit workspace-write access. Multi-folder Sessions use their canonical approved roots with lexically redundant descendants removed before filesystem resolution; cwd may be nested inside the first retained write root. Configured additional writable directories remain separate deployment grants. The configured root is the fallback for agentless calls and Sessions without a cwd.',
         parameters: [{ name: 'request', description: 'optional session and approved mode override.' }],
-        returns: 'the fully resolved per-call mode and absolute workspace root.',
+        returns: 'the fully resolved per-call mode and absolute workspace roots.',
+      },
+      {
+        signature: 'additionalRootsOf(session: Session): readonly string[]',
+        description: 'Read additional approved directories from the Session log without filesystem I/O.',
+        parameters: [{ name: 'session', description: 'Session whose approved directories are requested.' }],
+        returns: 'additional roots in recorded order, or an empty list without a record.',
+      },
+      {
+        signature: 'initializeWorkspaceRoots(session: Session, roots: readonly string[]): void',
+        description: 'Record canonical approved roots during new Session setup, including after the Session has been announced. Callers supply filesystem-canonical primary cwd and extra roots from approval; later grant reduction performs no filesystem lookup.',
+        parameters: [{ name: 'session', description: 'writable Session receiving its directory permissions.' }, { name: 'roots', description: 'canonical absolute approved directories; empty means no extra roots.' }],
       },
       {
         signature: 'overrideOf(session: Session): SandboxMode | undefined',
@@ -4526,6 +4537,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Rename one Workspace to a unique non-blank title.',
         parameters: [{ name: 'request', description: 'Workspace identity and proposed title.' }],
         returns: 'the updated Workspace projection.',
+      },
+      {
+        signature: '@Remote(\'addFolder\') addFolder(request: WorkspaceAddFolderRequest): Promise<WorkspaceValue>',
+        description: 'Add an existing directory to one Workspace, deduplicated by canonical realpath.',
+        parameters: [{ name: 'request', description: 'Workspace identity and fully qualified directory path.' }],
+        returns: 'the committed Workspace projection; invalid paths leave it unchanged.',
+      },
+      {
+        signature: '@Remote(\'removeFolder\') removeFolder(request: WorkspaceRemoveFolderRequest): Promise<WorkspaceValue>',
+        description: 'Remove an extra directory without requiring it to exist; never removes the primary path.',
+        parameters: [{ name: 'request', description: 'Workspace identity and extra directory path.' }],
+        returns: 'the committed Workspace projection.',
       },
       {
         signature: '@Remote(\'delete\') delete(request: WorkspaceDeleteRequest): Promise<WorkspaceDeleteValue>',
@@ -8085,7 +8108,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SandboxExecutionPolicy',
-    declaration: 'export interface SandboxExecutionPolicy {\n    mode: SandboxMode;\n    workspaceRoot: string;\n    additionalWritableRoots?: readonly string[];\n    sessionId?: SessionId;\n}',
+    declaration: 'export interface SandboxExecutionPolicy {\n    mode: SandboxMode;\n    workspaceRoot: string;\n    additionalWritableRoots?: readonly string[];\n    additionalWorkspaceRoots?: readonly string[];\n    sessionId?: SessionId;\n}',
   },
   {
     name: 'SandboxMode',
@@ -10165,7 +10188,11 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'Workspace',
-    declaration: 'export interface Workspace {\n    readonly id: WorkspaceId;\n    readonly path: string;\n    readonly title: string;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n    readonly sessionIds: readonly SessionId[];\n    setTitle(title: string): Promise<void>;\n    attachSession(sessionId: SessionId): Promise<void>;\n    insertSessionBefore(sessionId: SessionId, beforeSessionId?: SessionId): Promise<void>;\n    detachSession(sessionId: SessionId): Promise<void>;\n    status(): Promise<\'ok\' | \'missing-dir\'>;\n}',
+    declaration: 'export interface Workspace {\n    readonly id: WorkspaceId;\n    readonly path: string;\n    readonly additionalPaths: readonly string[];\n    readonly title: string;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n    readonly sessionIds: readonly SessionId[];\n    setTitle(title: string): Promise<void>;\n    addFolder(path: string): Promise<void>;\n    removeFolder(path: string): Promise<void>;\n    attachSession(sessionId: SessionId): Promise<void>;\n    insertSessionBefore(sessionId: SessionId, beforeSessionId?: SessionId): Promise<void>;\n    detachSession(sessionId: SessionId): Promise<void>;\n    status(): Promise<\'ok\' | \'missing-dir\'>;\n}',
+  },
+  {
+    name: 'WorkspaceAddFolderRequest',
+    declaration: 'export interface WorkspaceAddFolderRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly path: string;\n}',
   },
   {
     name: 'WorkspaceArchiveSessionRequest',
@@ -10284,6 +10311,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface WorkspacePinValue {\n    readonly pinnedSessionIds: readonly SessionId[];\n}',
   },
   {
+    name: 'WorkspaceRemoveFolderRequest',
+    declaration: 'export interface WorkspaceRemoveFolderRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly path: string;\n}',
+  },
+  {
     name: 'WorkspaceRenameRequest',
     declaration: 'export interface WorkspaceRenameRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly title: string;\n}',
   },
@@ -10301,7 +10332,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'WorkspaceView',
-    declaration: 'export interface WorkspaceView {\n    readonly workspaceId: WorkspaceId;\n    readonly path: string;\n    readonly title: string;\n    readonly sessionIds: readonly SessionId[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+    declaration: 'export interface WorkspaceView {\n    readonly workspaceId: WorkspaceId;\n    readonly path: string;\n    readonly additionalPaths?: readonly string[];\n    readonly title: string;\n    readonly sessionIds: readonly SessionId[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
 ]
 

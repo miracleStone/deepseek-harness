@@ -6,6 +6,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentOptions, AgentSetup } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
@@ -60,6 +61,8 @@ export interface ApiSessionCreateRequest {
   readonly cwd: string
   /** Preset the Session runs; the configured default when omitted. */
   readonly agentPreset?: string
+  /** Approved additional directories for a new Session; omission keeps only its cwd. */
+  readonly additionalWorkspaceRoots?: readonly string[]
   /**
    * Placement rule the caller owns, such as Workspace membership and archive state.
    * @param sessionId - existing Session named by the request.
@@ -228,7 +231,9 @@ export class ApiSessionAgentController {
    */
   async createSession(request: ApiSessionCreateRequest): Promise<ApiSessionCreated> {
     const named = request.sessionId
-    if (named === undefined) return this.created(await this.createMinted(request.cwd, await this.composeAgent(request.agentPreset)))
+    if (named === undefined) return this.created(await this.createMinted(
+      request.cwd, await this.composeAgent(request.agentPreset), request.additionalWorkspaceRoots,
+    ))
     return this.inOrder(named, async () => this.created(await this.claim(named, request)))
   }
 
@@ -340,14 +345,17 @@ export class ApiSessionAgentController {
         throw new ApiSessionCwdConflict(live.id, request.cwd, live.session.header.cwd)
       }
       const composition = await this.composeAgent(request.agentPreset)
-      return await this.reuseLive(live, request, composition) ?? this.createMinted(request.cwd, composition)
+      return await this.reuseLive(live, request, composition)
+        ?? this.createMinted(request.cwd, composition, request.additionalWorkspaceRoots)
     }
     let observation: SessionObservation
     try {
       observation = await this.ctx.sessionQuery.observeSession(sessionId)
     } catch (error: unknown) {
       if (!(error instanceof SessionQueryError) || error.code !== 'SESSION_QUERY_SESSION_NOT_FOUND') throw error
-      return this.createAgent(sessionId, request.cwd, await this.composeAgent(request.agentPreset))
+      return this.createAgent(
+        sessionId, request.cwd, await this.composeAgent(request.agentPreset), request.additionalWorkspaceRoots,
+      )
     }
     let reusable: boolean
     {
@@ -361,20 +369,22 @@ export class ApiSessionAgentController {
       reusable = request.reusable(sessionId) && !observed.events.some(event => event.type === 'turn/start')
     }
     const composition = await this.composeAgent(request.agentPreset)
-    if (!reusable) return this.createMinted(request.cwd, composition)
+    if (!reusable) return this.createMinted(request.cwd, composition, request.additionalWorkspaceRoots)
     this.assertPresetApplicable(sessionId, request.agentPreset)
     try {
       return (await this.ctx.agents.resume({
         resumeSessionId: sessionId,
         agentOptions: this.agentOptions(),
-        setup: this.reuseSetup(composition),
+        setup: this.reuseSetup(composition, request.additionalWorkspaceRoots),
       })).agent
     } catch (error: unknown) {
-      if (error instanceof ApiSessionStartedSinceObserved) return this.createMinted(request.cwd, composition)
+      if (error instanceof ApiSessionStartedSinceObserved) {
+        return this.createMinted(request.cwd, composition, request.additionalWorkspaceRoots)
+      }
       if (!(error instanceof Error) || error.name !== 'SessionAlreadyOwnedError') throw error
       // Another resume in this process may hold the writer for the Agent it published.
       return this.ctx.agents.get(sessionId) === undefined
-        ? this.createMinted(request.cwd, composition)
+        ? this.createMinted(request.cwd, composition, request.additionalWorkspaceRoots)
         : this.claim(sessionId, request)
     }
   }
@@ -385,7 +395,8 @@ export class ApiSessionAgentController {
     request: ApiSessionCreateRequest,
     composition: ApiSessionComposition,
   ): Promise<Agent | undefined> {
-    if (!request.reusable(live.id) || !this.isBlank(live.session)) return undefined
+    if (!request.reusable(live.id) || !this.isBlank(live.session)
+      || !this.sameWorkspaceRoots(live.session, request.additionalWorkspaceRoots)) return undefined
     this.assertPresetApplicable(live.id, request.agentPreset)
     const current = this.presetForSession(live.session)
     const presets = this.ctx.get('agentPresets')
@@ -401,9 +412,11 @@ export class ApiSessionAgentController {
   }
 
   /** Setup that re-checks blankness under the acquired writer, then records a preset change before publication. */
-  private reuseSetup(composition: ApiSessionComposition): AgentSetup {
+  private reuseSetup(composition: ApiSessionComposition, roots?: readonly string[]): AgentSetup {
     return async (agentCtx, agent) => {
-      if (!this.isBlank(agent.session)) throw new ApiSessionStartedSinceObserved()
+      if (!this.isBlank(agent.session) || !this.sameWorkspaceRoots(agent.session, roots)) {
+        throw new ApiSessionStartedSinceObserved()
+      }
       const commit = await composition.setup(agentCtx, agent)
       const target = composition.agentPreset
       if (target !== undefined && this.presetForSession(agent.session) !== target) {
@@ -429,15 +442,34 @@ export class ApiSessionAgentController {
     return { agent, agentPreset: this.presetForSession(agent.session) }
   }
 
-  private createMinted(cwd: string, composition: ApiSessionComposition): Promise<Agent> {
-    return this.createAgent(brandString<SessionId>(`session-${randomUUID()}`), cwd, composition)
+  private createMinted(cwd: string, composition: ApiSessionComposition, roots?: readonly string[]): Promise<Agent> {
+    return this.createAgent(brandString<SessionId>(`session-${randomUUID()}`), cwd, composition, roots)
   }
 
-  private async createAgent(sessionId: SessionId, cwd: string, composition: ApiSessionComposition): Promise<Agent> {
+  private sameWorkspaceRoots(session: Session, requested: readonly string[] = []): boolean {
+    const policy = this.ctx.get('sandboxPolicy')
+    if (policy === undefined) return requested.length === 0
+    const recorded = policy.additionalRootsOf(session)
+    return requested.length === recorded.length && requested.every(root => recorded.includes(root))
+  }
+
+  private async createAgent(
+    sessionId: SessionId,
+    cwd: string,
+    composition: ApiSessionComposition,
+    roots: readonly string[] = [],
+  ): Promise<Agent> {
     try {
       await mkdir(cwd, { recursive: true })
     } catch (error: unknown) {
       throw new Error(`failed to ensure project directory "${cwd}": ${String(error)}`, { cause: error })
+    }
+    const additionalRoots = [...roots]
+    const setup: AgentSetup = additionalRoots.length === 0 ? composition.setup : async (agentCtx, agent) => {
+      const policy = agentCtx.get('sandboxPolicy')
+      if (policy === undefined) throw new Error('api-session: multiple workspace folders require sandbox-policy')
+      policy.initializeWorkspaceRoots(agent.session, additionalRoots)
+      return composition.setup(agentCtx, agent)
     }
     return (await this.ctx.agents.create({
       sessionId,
@@ -446,7 +478,7 @@ export class ApiSessionAgentController {
         cwd,
         ...(composition.agentPreset === undefined ? {} : { agentPreset: composition.agentPreset }),
       },
-      setup: composition.setup,
+      setup,
     })).agent
   }
 

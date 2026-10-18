@@ -59,6 +59,13 @@ await project.setTitle('Renamed')
 ctx.workspaceRegistry.list() // shows the project, newest first
 ```
 
+<a id="additional-folders"></a>
+### Additional folders
+
+A Workspace keeps one immutable primary `path` and an ordered `additionalPaths` list. `addFolder(path)` accepts a fully qualified existing directory, resolves its canonical realpath, and ignores duplicates, including aliases of the primary directory. `removeFolder(path)` removes only extras, idempotently; the stored canonical spelling remains removable after its directory disappears. Existing aliases can also identify a removal. The primary directory cannot be removed, so a Workspace always retains at least one root.
+
+Folder validation and writes share the registry's serialized mutation queue. An invalid path or failed storage write leaves the record and change notifications untouched; the caller receives `WorkspaceInvalidPathError` for invalid paths, `WorkspacePrimaryFolderError` for primary removal, or the original storage failure. Neither operation creates or deletes filesystem entries. Extra folders never change the primary path, directory status, Session cwd, or Session membership.
+
 <a id="first-use-workspace"></a>
 ### First-use Workspace
 
@@ -90,12 +97,13 @@ This section explains the design decisions behind the feature and points at the 
 
 ### Design philosophy
 
-- **One record per canonical path.** `fs.realpath` is the single uniqueness canon: paths are stored canonicalized, so a symlink to an owned directory collides, and uniqueness is string equality of canonical paths.
+- **One record per canonical primary path.** `fs.realpath` is the single uniqueness canon: paths are stored canonicalized, so a symlink to an owned primary directory collides. Extra folders are deduplicated within their Workspace and do not claim registry identity.
 - **Membership starts from the recorded account.** The header index validates ordered `sessionIds`; missing-directory candidates retain their account, while other invalid candidates are filtered on read and pruned by the next mutation. The strict canonical-path index used for history bootstrap includes existing directories only.
 - **Header-only reads.** Bootstrap and attach validation read `SessionHeader` fields only; event bodies are never loaded.
 - **Two-write mutations with an explicit marker.** Create and delete persist a `pendingMutation` marker before the record/order pair can diverge, so startup completes exactly the interrupted operation and unmarked divergence fails loud as corruption.
-- **Serialized writes.** Registry operations run on one operation chain; entity mutations go through `table.update` on the domain write chain, stamping `updatedAt` and deciding membership at their chain slot.
+- **Serialized writes.** Registry and entity operations share one operation chain; asynchronous folder validation completes there before `table.update` commits on the domain write chain, stamping `updatedAt` and deciding membership at its chain slot.
 
+<a id="api-behavior"></a>
 ### API behavior
 
 The API has two owners: `WorkspaceRegistry` creates, orders, and deletes projects, manages their Session accounting, and pins, unpins, archives, or restores Sessions; the `Workspace` entity exposes the display title, directory status, and Session projection. Pinning requires a known, unarchived Session; archiving clears its pin in the same durable write, and restoring does not restore that pin. Per-method contracts live in [src/index.ts](src/index.ts) and [src/entity.ts](src/entity.ts).
@@ -115,6 +123,8 @@ Archive admission is a capability seam over two Host events this package declare
 ### Durable shape
 
 The registry opens the `workspace` domain (version 2): a `workspaces` table keyed by `WorkspaceId` plus one global state holding `workspaceIds` (the authoritative display order), `archivedSessionIds`, `pinnedSessionIds`, the optional `defaultWorkspaceId` first-use identity, and the optional `pendingMutation` marker. Archive and pin sets contain Session id strings, default to empty, and carry no per-entry objects or timestamps; the pin array keeps the most recently pinned id first. Archiving clears the pin in the same global-state write without changing Workspace membership. Unarchive runs no session-existence probe, because dropping an id from the set cannot introduce an unknown one, while archive verifies the session before adding it.
+
+Each Workspace record stores its immutable primary `path`; optional `additionalPaths` stores the extra canonical directories in insertion order. Omission means an empty list, and existing records load without rewriting it.
 
 ### Lifecycle
 

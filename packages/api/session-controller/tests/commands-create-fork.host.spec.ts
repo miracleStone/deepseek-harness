@@ -89,11 +89,12 @@ describe('Session creation failures', () => {
     await missing.fiber.dispose()
 
     const failed = await baseContext()
-    const workspace = {
+    const workspace: Pick<Workspace, 'id' | 'path' | 'additionalPaths' | 'attachSession'> = {
       id: 'workspace-1' as WorkspaceId,
       path: '/workspace',
+      additionalPaths: [],
       attachSession: () => Promise.reject(new Error('read-only workspace')),
-    } as unknown as Workspace
+    }
     failed.provide('workspaceRegistry', {
       get: () => workspace,
       list: () => [workspace],

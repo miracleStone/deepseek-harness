@@ -16,7 +16,7 @@ import type { ToolRestriction } from '@deepseek-ai/dsh-tools'
 // `ctx.get('permissionPresets')` resolve to their services when composed — delegation consumes them
 // opportunistically (the documented `ctx.get` pattern), never as a hard dep —
 // and merge the inherited permission session-event payloads.
-import type {} from '@deepseek-ai/dsh-sandbox-policy'
+import type SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 // Type-only: make `ctx.get('agentPresets')` resolve to the preset roster when
@@ -227,6 +227,8 @@ export interface DelegatedPolicyOverrides {
   readonly permissionPreset: 'auto' | 'danger-full-access' | undefined
   /** The parent session's explicit sandbox-mode override, or `undefined` without one. */
   readonly sandboxMode: SandboxMode | undefined
+  /** Additional directories captured from the parent's logged sandbox policy. */
+  readonly additionalWorkspaceRoots?: readonly string[]
   /**
    * `'never'` whenever the approval capability is composed, `undefined`
    * otherwise: a delegated child acts only within the sandbox scope fixed at
@@ -248,9 +250,12 @@ export interface DelegatedPolicyOverrides {
  */
 export function captureDelegatedPolicyOverrides(parent: Agent): DelegatedPolicyOverrides {
   const preset = parent.ctx.get('permissionPresets')?.current(parent.session)
+  const sandbox = parent.ctx.get('sandboxPolicy')
+  const roots = sandbox?.additionalRootsOf(parent.session)
   return {
     permissionPreset: preset === 'auto' || preset === 'danger-full-access' ? preset : undefined,
-    sandboxMode: parent.ctx.get('sandboxPolicy')?.overrideOf(parent.session),
+    sandboxMode: sandbox?.overrideOf(parent.session),
+    ...(roots === undefined ? {} : { additionalWorkspaceRoots: [...roots] }),
     approvalPolicy: parent.ctx.get('approval') === undefined ? undefined : 'never',
   }
 }
@@ -263,11 +268,17 @@ export function captureDelegatedPolicyOverrides(parent: Agent): DelegatedPolicyO
  * switches still win over these events.
  * @param childSession - the child's announced, writable Session.
  * @param overrides - the policy captured at delegation.
+ * @param sandbox - policy owner; required when additional workspace roots were captured, otherwise unused.
  */
 export function appendDelegatedPolicyOverrides(
   childSession: Session,
   overrides: DelegatedPolicyOverrides,
+  sandbox?: SandboxPolicyService,
 ): void {
+  if (overrides.additionalWorkspaceRoots !== undefined) {
+    if (sandbox === undefined) throw new Error('subagent: inherited workspace folders require sandbox-policy')
+    sandbox.initializeWorkspaceRoots(childSession, overrides.additionalWorkspaceRoots)
+  }
   if (overrides.sandboxMode !== undefined) {
     childSession.append('sandbox/mode', { mode: overrides.sandboxMode, source: 'delegation' })
   }

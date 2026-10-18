@@ -1,5 +1,5 @@
 /** Real helper dispatch over private in-memory transport, without changing the Harness process cwd. */
-import { readFile, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 import { LocalSandboxProvider } from '@deepseek-ai/dsh-sandbox-local'
 import { SubprocessExecutableNotFoundError } from '@deepseek-ai/dsh-subprocess'
@@ -84,6 +84,57 @@ describe.skipIf(process.platform === 'win32')('SSH helper runtime', () => {
       await test.client.request('fs.streamClose', { id: early }, z.null())
       await expect(test.client.request('fs.next', { id: early }, nextSchema)).rejects.toThrow('Unknown SSH text stream')
     } finally { await test.close() }
+  })
+
+  it('canonicalizes and deduplicates remote workspace roots for sandbox and filesystem calls', async () => {
+    const test = await helper()
+    const confine = vi.spyOn(LocalSandboxProvider.prototype, 'confine').mockImplementation(async argv => ({
+      argv: ['confined', ...argv], enforcement: 'full', denialSignatures: [], runnerFailureRules: [],
+    }))
+    try {
+      const primary = `${test.root}/primary`
+      const extra = `${test.root}/extra`
+      const alias = `${test.root}/extra-alias`
+      await mkdir(primary)
+      await mkdir(extra)
+      await symlink(extra, alias)
+      const roots = { workspaceRoot: primary, additionalWorkspaceRoots: [alias, extra, primary, alias] }
+      for (const mode of ['workspace-write', 'read-only']) {
+        await test.client.request('sandbox', { argv: ['true'], policy: { mode, ...roots } }, z.unknown())
+        expect(confine).toHaveBeenLastCalledWith(['true'], {
+          mode, workspaceRoot: primary, additionalWorkspaceRoots: [extra],
+        }, expect.any(AbortSignal))
+      }
+      const target = await test.client.request('fs.resolve', { path: `${extra}/written.txt` }, targetSchema)
+      await test.client.request('fs.write', { target, content: 'extra root', policy: { mode: 'workspace-write', ...roots } }, writeResultSchema)
+      await expect(test.client.request('fs.write', {
+        target, content: 'denied', policy: { mode: 'read-only', ...roots },
+      }, writeResultSchema)).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+      expect(await test.client.request('fs.readText', { target }, z.string())).toBe('extra root')
+    } finally { confine.mockRestore(); await test.close() }
+  })
+
+  it('rejects missing or non-directory remote workspace roots before sandbox or file effects', async () => {
+    const test = await helper()
+    const confine = vi.spyOn(LocalSandboxProvider.prototype, 'confine')
+    try {
+      const file = `${test.root}/file.txt`
+      await writeFile(file, 'unchanged')
+      const target = await test.client.request('fs.resolve', { path: file }, targetSchema)
+      const missing = `${test.root}/missing`
+      for (const mode of ['workspace-write', 'read-only']) {
+        for (const [root, code] of [[missing, 'FS_NOT_FOUND'], [file, 'FS_NOT_DIRECTORY']]) {
+          const policy = { mode, workspaceRoot: test.root, additionalWorkspaceRoots: [root] }
+          await expect(test.client.request('sandbox', { argv: ['true'], policy }, z.unknown())).rejects.toMatchObject({ code })
+          await expect(test.client.request('fs.write', { target, content: 'changed', policy }, writeResultSchema)).rejects.toMatchObject({ code })
+        }
+      }
+      await expect(test.client.request('sandbox', {
+        argv: ['true'], policy: { mode: 'workspace-write', workspaceRoot: missing, additionalWorkspaceRoots: [test.root] },
+      }, z.unknown())).rejects.toMatchObject({ code: 'FS_NOT_FOUND' })
+      expect(confine).not.toHaveBeenCalled()
+      expect(await test.client.request('fs.readText', { target }, z.string())).toBe('unchanged')
+    } finally { confine.mockRestore(); await test.close() }
   })
 
   it('refuses unconfined sandbox requests and resolves executables in the helper world', async () => {

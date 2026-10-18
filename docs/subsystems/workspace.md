@@ -20,7 +20,7 @@ type WorkspaceId = Branded<'WorkspaceId'>
 
 ## The workspace entity
 
-Consumers see only the `Workspace` interface; the implementation stays package-private.
+Consumers see only the `Workspace` interface; the implementation stays package-private. The immutable `path` remains its primary directory and Session-membership anchor. `additionalPaths` retains canonical extra folders; adding or removing one never moves sessions or deletes files. New conversations capture these folders through the [sandbox policy](sandbox.md#per-call-policy), while existing conversations retain their logged grants.
 
 ```ts type-equiv
 /**
@@ -40,6 +40,9 @@ interface Workspace {
    * afterwards, even when the directory disappears (see {@link status}).
    */
   readonly path: string
+
+  /** Extra canonical directories in insertion order; empty when the stored optional field is absent. */
+  readonly additionalPaths: readonly string[]
 
   /** Display title. Defaults to the final path segment, or a filesystem root's own spelling; duplicates are allowed. */
   readonly title: string
@@ -69,6 +72,29 @@ interface Workspace {
    * @returns resolution after durability.
    */
   setTitle(title: string): Promise<void>
+
+  /**
+   * Add an existing directory after fully qualified path, realpath, and directory
+   * validation at its serialized mutation slot. Canonical duplicates, including
+   * the primary path, are no-ops. Never changes the primary path or Session membership.
+   * Invalid paths and failed storage writes leave the record unchanged.
+   * @param path - Fully qualified existing directory to add.
+   * @returns resolution after durability.
+   * @throws {WorkspaceInvalidPathError} when the path cannot name an existing directory.
+   */
+  addFolder(path: string): Promise<void>
+
+  /**
+   * Remove an extra directory idempotently. The stored canonical spelling works
+   * even after the directory disappears; existing aliases are resolved when needed.
+   * Rejects removal of the primary directory, including an existing alias to it.
+   * Invalid paths and failed storage writes leave the record unchanged.
+   * @param path - Fully qualified extra directory path to remove.
+   * @returns resolution after durability.
+   * @throws {WorkspaceInvalidPathError} when the path is not fully qualified or cannot be inspected.
+   * @throws {WorkspacePrimaryFolderError} when the path identifies the primary directory.
+   */
+  removeFolder(path: string): Promise<void>
 
   /**
    * Prepend a session to this workspace's candidate account. An already
@@ -336,6 +362,20 @@ Host service backing the generated `ctx.remote.workspace` namespace.
  * @returns the updated Workspace projection.
  */
 @Remote('rename') rename(request: WorkspaceRenameRequest): Promise<WorkspaceValue>
+
+/**
+ * Add an existing directory to one Workspace, deduplicated by canonical realpath.
+ * @param request - Workspace identity and fully qualified directory path.
+ * @returns the committed Workspace projection; invalid paths leave it unchanged.
+ */
+@Remote('addFolder') addFolder(request: WorkspaceAddFolderRequest): Promise<WorkspaceValue>
+
+/**
+ * Remove an extra directory without requiring it to exist; never removes the primary path.
+ * @param request - Workspace identity and extra directory path.
+ * @returns the committed Workspace projection.
+ */
+@Remote('removeFolder') removeFolder(request: WorkspaceRemoveFolderRequest): Promise<WorkspaceValue>
 
 /**
  * Remove one Workspace registration while retaining files and Sessions.

@@ -16,6 +16,7 @@ import {
   WorkspaceArchiveError,
   WorkspaceController,
   WorkspaceCreateError,
+  WorkspaceFolderError,
   type WorkspaceFollowSink,
 } from '../src/client/index.ts'
 import type { WorkspaceFollowFrame, WorkspaceId } from '../src/types.ts'
@@ -148,7 +149,10 @@ describe('Workspace Controller Client apply', () => {
 describe('Workspace state stream', () => {
   it('delivers one baseline followed by increments', async ({ mock, start }) => {
     const { remote } = await gatewayClient(mock, start)
-    const opening = baseline('one')
+    const opening = {
+      ...baseline('one'),
+      value: { ...baseline('one').value, items: [workspace('one', { additionalPaths: ['/extra'] })] },
+    }
     const view = opening.value.items[0]!
     const increments: WorkspaceFollowFrame[] = [
       { type: 'upsert', workspace: view },
@@ -365,6 +369,8 @@ describe('WorkspaceController', () => {
     await expect(controller.initializeDefault(new AbortController().signal)).resolves.toMatchObject({ workspaceId: 'default' })
     await expect(controller.create({ path: '/work/created' })).resolves.toMatchObject({ workspaceId: 'created' })
     await expect(controller.rename(wid('one'), 'renamed')).resolves.toMatchObject({ title: 'renamed' })
+    await expect(controller.addFolder(wid('one'), '/extra')).resolves.toMatchObject({ additionalPaths: ['/extra'] })
+    await expect(controller.removeFolder(wid('one'), '/extra')).resolves.not.toHaveProperty('additionalPaths')
     await expect(controller.insertBefore(wid('one'))).resolves.toBeUndefined()
     await expect(controller.insertSessionBefore(wid('one'), sid('session'))).resolves.toMatchObject({
       sessionIds: ['session'],
@@ -377,6 +383,8 @@ describe('WorkspaceController', () => {
     // Each command crosses the wire as one positional request object.
     expect(mock.log.requests('workspace/create')).toEqual([{ path: '/work/created' }])
     expect(mock.log.requests('workspace/rename')).toEqual([{ workspaceId: 'one', title: 'renamed' }])
+    expect(mock.log.requests('workspace/addFolder')).toEqual([{ workspaceId: 'one', path: '/extra' }])
+    expect(mock.log.requests('workspace/removeFolder')).toEqual([{ workspaceId: 'one', path: '/extra' }])
     expect(mock.log.requests('workspace/insertBefore')).toEqual([{ workspaceId: 'one' }])
     expect(mock.log.requests('workspace/insertSessionBefore')).toEqual([{ workspaceId: 'one', sessionId: 'session' }])
     await expect(controller.archiveSession(sid('session'), { stopActivity: true })).resolves.toBeUndefined()
@@ -400,6 +408,14 @@ describe('WorkspaceController', () => {
     const create = controller.create({ path: '/missing' })
     await expect(create).rejects.toBeInstanceOf(WorkspaceCreateError)
     await expect(create).rejects.toThrow('workspace create failed: workspace/invalid-path: missing path')
+
+    const invalidFolder = new RemoteError('workspace/invalid-path', 'missing folder', { path: '/missing' })
+    mock.remote.workspace.addFolder.mockResolvedValueOnce(err(invalidFolder))
+    await expect(controller.addFolder(wid('one'), '/missing')).rejects.toMatchObject({
+      name: 'WorkspaceFolderError', operation: 'add', rpcError: { code: 'workspace/invalid-path', details: { path: '/missing' } },
+    })
+    mock.remote.workspace.removeFolder.mockResolvedValueOnce(err(new RemoteError('gateway/bad-request', 'primary folder', {})))
+    await expect(controller.removeFolder(wid('one'), '/work/one')).rejects.toBeInstanceOf(WorkspaceFolderError)
 
     mock.remote.workspace.rename.mockResolvedValueOnce(err(missingWorkspace))
     await expect(controller.rename(wid('missing'), 'name')).rejects.toThrow('workspace rename failed: workspace/not-found: gone')

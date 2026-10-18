@@ -3,8 +3,36 @@
  * @module @deepseek-ai/dsh-workspace/src/paths
  */
 
-import { realpath } from 'node:fs/promises'
-import { posix, win32 } from 'node:path'
+import { realpath, stat } from 'node:fs/promises'
+import { posix, resolve, win32 } from 'node:path'
+
+/** A folder mutation rejected its path before any durable change. Storage failures never use this type. */
+export class WorkspaceInvalidPathError extends Error {
+  /**
+   * @param path - Requested folder path.
+   * @param reason - Failed directory requirement.
+   * @param options - Filesystem failure when directory inspection failed.
+   */
+  constructor(
+    readonly path: string,
+    readonly reason: 'not-fully-qualified' | 'not-directory' | 'unavailable',
+    options?: ErrorOptions,
+  ) {
+    super(`Workspace folder '${path}' ${reason === 'not-fully-qualified'
+      ? 'must be fully qualified'
+      : reason === 'not-directory' ? 'is not a directory' : 'cannot be resolved or inspected'}`, options)
+    this.name = 'WorkspaceInvalidPathError'
+  }
+}
+
+/** A folder removal named the immutable primary directory; no mutation was written. */
+export class WorkspacePrimaryFolderError extends Error {
+  /** @param path - Requested primary directory path. */
+  constructor(readonly path: string) {
+    super(`cannot remove primary Workspace folder '${path}'; remove the Workspace registration instead`)
+    this.name = 'WorkspacePrimaryFolderError'
+  }
+}
 
 /**
  * Check whether a path names one fixed Host location without process cwd or
@@ -54,4 +82,43 @@ export async function realpathNormalize(path: string): Promise<string> {
     throw new TypeError(`Workspace path is not fully qualified: '${path}'`)
   }
   return await realpath(path)
+}
+
+/**
+ * Validate and canonicalize an existing folder without touching Workspace storage.
+ * @param path - Fully qualified existing directory.
+ * @returns its canonical realpath.
+ */
+export async function existingWorkspaceFolder(path: string): Promise<string> {
+  if (!fullyQualifiedWorkspacePath(path)) throw new WorkspaceInvalidPathError(path, 'not-fully-qualified')
+  let canonical: string
+  let directory: boolean
+  try {
+    canonical = await realpathNormalize(path)
+    directory = (await stat(canonical)).isDirectory()
+  } catch (error) {
+    throw new WorkspaceInvalidPathError(path, 'unavailable', { cause: error })
+  }
+  if (!directory) throw new WorkspaceInvalidPathError(path, 'not-directory')
+  return canonical
+}
+
+/**
+ * Match a stored folder without requiring it to exist; resolve an existing alias only when needed.
+ * @param path - Fully qualified removal path.
+ * @param storedPaths - Primary and extra canonical directory paths.
+ * @returns normalized stored spelling or the existing alias's realpath.
+ */
+export async function removedWorkspaceFolder(path: string, storedPaths: readonly string[]): Promise<string> {
+  if (!fullyQualifiedWorkspacePath(path)) throw new WorkspaceInvalidPathError(path, 'not-fully-qualified')
+  const normalized = resolve(path)
+  if (storedPaths.includes(normalized)) return normalized
+  try {
+    return await realpathNormalize(path)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) {
+      return normalized
+    }
+    throw new WorkspaceInvalidPathError(path, 'unavailable', { cause: error })
+  }
 }

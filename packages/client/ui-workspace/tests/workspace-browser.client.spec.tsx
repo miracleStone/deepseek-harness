@@ -118,7 +118,10 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
   const store = createWorkspaceViewStore().create()
   const props: WorkspaceBrowserProps = {
     useWorkspaceActionRequest: bindSnapshotSelector(request),
-    settleWorkspaceAction: () => { request.set(null) },
+    settleWorkspaceAction: () => {
+      if (request.getSnapshot()?.action === 'manage-folders') controls.directoryBusy(false)
+      request.set(null)
+    },
     useContextMenuTarget: selector => selector(null),
     useShortcuts: select => select([]),
     useWorkspaceShortcuts: bindSnapshotSelector(controls.state),
@@ -147,6 +150,9 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     notifyArchivedNotOpenable: vi.fn(),
     renameWorkspace: vi.fn(async () => {}),
     deleteWorkspace: vi.fn(async () => {}),
+    addWorkspaceFolder: vi.fn(async () => workspace('created', [])),
+    removeWorkspaceFolder: vi.fn(async () => workspace('created', [])),
+    notifyWorkspaceFolder: vi.fn(),
     unarchiveSession: vi.fn(async () => {}),
     insertWorkspaceBefore: vi.fn(async () => {}),
     createWorkspace: vi.fn(async () => workspace('created', [])),
@@ -158,9 +164,12 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     ...overrides,
   }
   const view = render(<WorkspaceBrowser {...props} />)
-  return { view, props, store, controls, openDialog: (workspaceId: WorkspaceId, displayTitle: string, action: 'rename' | 'delete') => {
+  return { view, props, store, controls, openDialog: (workspaceId: WorkspaceId, displayTitle: string, action: WorkspaceActionRequest['action']) => {
     const storedTitle = props.useWorkspaces(state => state.items.find(row => row.workspaceId === workspaceId)?.title ?? displayTitle)
-    act(() => { request.set({ action, workspaceId, displayTitle, storedTitle }) })
+    act(() => {
+      if (action === 'manage-folders') { controls.closeAdd(); controls.directoryBusy(true) }
+      request.set({ action, workspaceId, displayTitle, storedTitle })
+    })
   } }
 }
 
@@ -205,6 +214,39 @@ describe('WorkspaceBrowser', () => {
     expect(bindScrollerRef).toHaveBeenLastCalledWith(list)
     browser.view.unmount()
     expect(bindScrollerRef).toHaveBeenLastCalledWith(null)
+  })
+
+  it('manages the row Workspace through the existing directory slot without creating a Workspace or Session', async () => {
+    const target = { ...workspace('alpha', []), path: 'F:\\projects\\alpha', additionalPaths: ['G:\\shared'] }
+    let flow: DirectoryFlowOwnerProps | undefined
+    const b = mount({
+      useWorkspaces: hook(workspaceState([target, workspace('beta', [])])),
+      renderSlot: (name: string, owner: object) => {
+        if (name === 'sidebar.workspaces.directoryFlow') flow = owner as DirectoryFlowOwnerProps
+        return null
+      },
+    })
+    b.openDialog(target.workspaceId, target.title, 'manage-folders')
+    expect(screen.queryByRole('menu')).toBeNull()
+    const dialog = screen.getByRole('dialog', { name: '管理工作区文件夹' })
+    expect(within(dialog).getByText('F:\\projects\\alpha')).toBeTruthy()
+    expect(within(dialog).getByText('G:\\shared')).toBeTruthy()
+    expect(b.controls.state.getSnapshot().directoryBusy).toBe(true)
+    fireEvent.click(within(dialog).getByRole('button', { name: '添加文件夹' }))
+    expect(flow?.open).toBe(true)
+    act(() => { flow?.onPicked('H:\\another') })
+    await waitFor(() => { expect(b.props.addWorkspaceFolder).toHaveBeenCalledWith(target.workspaceId, 'H:\\another') })
+    expect(b.props.createWorkspace).not.toHaveBeenCalled()
+    expect(b.props.startSession).not.toHaveBeenCalled()
+    expect(b.props.open).not.toHaveBeenCalled()
+    await waitFor(() => { expect(b.props.notifyWorkspaceFolder).toHaveBeenCalledWith({ kind: 'folderAdded' }) })
+    rerender(b, { useWorkspaces: hook(workspaceState([{ ...target, additionalPaths: ['G:\\shared', 'H:\\another'] }])) })
+    expect(within(dialog).getByText('H:\\another')).toBeTruthy()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(b.controls.state.getSnapshot().directoryBusy).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '添加工作区' }))
+    expect(flow?.open).toBe(true)
   })
 
   it.each(['workspace', 'flat', 'ungrouped'] as const)('keeps %s recency independent of arrival order and saved manual positions', (mode) => {

@@ -8,6 +8,7 @@
 import { ok, type RemoteTable, type StreamScript } from '@deepseek-ai/dsh-remote-mock'
 import type { RemoteFailure, RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
+  WorkspaceAddFolderRequest,
   WorkspaceArchiveSessionRequest,
   WorkspaceArchiveValue,
   WorkspaceCreateRequest,
@@ -22,6 +23,7 @@ import type {
   WorkspacePinSessionRequest,
   WorkspacePinValue,
   WorkspaceRenameRequest,
+  WorkspaceRemoveFolderRequest,
   WorkspaceUnarchiveSessionRequest,
   WorkspaceUnpinSessionRequest,
   WorkspaceValue,
@@ -97,6 +99,12 @@ export const workspaceWorld: RemoteTable = {
     }),
     'workspace/rename': (request: WorkspaceRenameRequest): RemoteResult<WorkspaceValue> => ok({
       workspace: workspace(String(request.workspaceId), { title: request.title }),
+    }),
+    'workspace/addFolder': (request: WorkspaceAddFolderRequest): RemoteResult<WorkspaceValue> => ok({
+      workspace: workspace(String(request.workspaceId), { additionalPaths: [request.path] }),
+    }),
+    'workspace/removeFolder': (request: WorkspaceRemoveFolderRequest): RemoteResult<WorkspaceValue> => ok({
+      workspace: workspace(String(request.workspaceId)),
     }),
     'workspace/delete': (_request: WorkspaceDeleteRequest): RemoteResult<WorkspaceDeleteValue> => ok({ deleted: true }),
     'workspace/insertBefore': (request: WorkspaceInsertBeforeRequest): RemoteResult<WorkspaceOrderValue> => ok({ workspaceIds: [request.workspaceId] }),

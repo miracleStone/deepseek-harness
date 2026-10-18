@@ -27,7 +27,7 @@ kind: "package-reference"
 
 在自定义 `dsh` 配置组合中，将本服务与 [`fs-ssh`](../fs-ssh/README.zh.md)、[`subprocess-ssh`](../subprocess-ssh/README.zh.md) 和 [`sandbox-ssh`](../sandbox-ssh/README.zh.md) 组合。主机运行 Harness、模型传输和 Session 存储；远端机器提供文件与进程。headless 配置组合支持这种安排。
 
-辅助进程验证线协议中的额外可写根目录；其执行限制的提供方要求使用远端文件系统中的物理目录路径。只读模式不授予这些目录的写权限。
+辅助进程验证线协议中的 `additionalWritableRoots` 并保留其路径写法；其执行限制的提供方要求使用远端文件系统中的物理目录路径，并在每次调用时拒绝经过符号链接的授权。只读模式不授予这些目录的写权限。
 
 ### 部署前提
 
@@ -46,6 +46,8 @@ kind: "package-reference"
 | `maxFrameBytes` | `67108864` | 每条 JSON 消息的负载上限，最大为 64 MiB |
 | `maxPending` | `128` | 普通未完成请求的数量上限；心跳与有界清理请求使用预留容量 |
 | `leaseMs` | `30000` | 辅助进程心跳租期，范围为 3000 至 600000 毫秒 |
+
+逐调用的沙箱和文件系统策略保留 `workspaceRoot` 作为主远端目录，并接受可选的 `additionalWorkspaceRoots`。helper 在远端文件系统中解析并去重完整列表；提供额外根目录时，缺失或非目录的根路径会在文件修改或受限启动之前导致失败。`workspace-write` 授予全部根目录，`read-only` 则一个也不授予。这些路径绝不会对照 Harness 主机文件系统规范化。
 
 将验证后的 `ctx.ssh.ptcLaunch` 作为 [`NodePtcRuntime`](../../ptc-runtime/ptc-runtime-node/README.zh.md) 的 `launch` 配置。可执行文件部署包含 worker；脚本部署使用 PTC 时需要两个引导字段，仅使用文件系统和 Bash 时可以省略。脚本引导未配置时，getter 会拒绝访问。客户端在就绪前拒绝不匹配的协议版本、运行形式和 helper 摘要。
 

@@ -1,4 +1,4 @@
-import { IconEditOutlineRegular, IconTrashOutlineRegular, IconPinFillRegular, IconPinOutlineRegular, IconUnarchiveOutlineRegular, IconArchiveOutlineRegular, IconBranchOutlineRegular, IconCopyOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconFolderOpenRegular, IconEditOutlineRegular, IconTrashOutlineRegular, IconPinFillRegular, IconPinOutlineRegular, IconUnarchiveOutlineRegular, IconArchiveOutlineRegular, IconBranchOutlineRegular, IconCopyOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { SessionMenu } from './session-actions/SessionMenu.tsx'
 import type {} from '@deepseek-ai/dsh-client-ui-context-menu/client'
 /**
@@ -263,19 +263,36 @@ export function apply(ctx: Context): void {
     dismissToast: () => { rowToast.set(null) },
   })
   const workspaceActionRequest = createSnapshotStore<WorkspaceActionRequest | null>(null)
-  const requestWorkspaceAction = (workspaceId: WorkspaceId, displayTitle: string, action: 'rename' | 'delete'): void => {
+  const canManageFolders = (workspaceId: WorkspaceId): boolean =>
+    ctx.remoteAccess.source('workspace', workspaceId, 'workspace/addFolder').getSnapshot()
+    || ctx.remoteAccess.source('workspace', workspaceId, 'workspace/removeFolder').getSnapshot()
+  const requestWorkspaceAction = (workspaceId: WorkspaceId, displayTitle: string, action: WorkspaceActionRequest['action']): void => {
     const workspace = workspaces.list.getSnapshot().items.find(row => row.workspaceId === workspaceId)
-    if (workspace === undefined || !ctx.remoteAccess.source('workspace', workspaceId, `workspace/${action}`).getSnapshot()) return
+    const allowed = action === 'manage-folders'
+      ? canManageFolders(workspaceId)
+      : ctx.remoteAccess.source('workspace', workspaceId, `workspace/${action}`).getSnapshot()
+    if (workspace === undefined || !allowed) return
+    if (action === 'manage-folders') shortcutControls.closeAdd()
+    if (action === 'manage-folders' || workspaceActionRequest.getSnapshot()?.action === 'manage-folders') {
+      shortcutControls.directoryBusy(action === 'manage-folders')
+    }
     workspaceActionRequest.set({ action, workspaceId, displayTitle, storedTitle: workspace.title })
   }
   ctx.slots.inject('contextMenu.icon', function* () {
     for (const [key, Icon] of Object.entries({
+      'workspace.folders': IconFolderOpenRegular,
       'workspace.rename': IconEditOutlineRegular, 'workspace.delete': IconTrashOutlineRegular,
       'workspace.pin': IconPinOutlineRegular, 'workspace.unpin': IconPinFillRegular,
       'workspace.archive': IconArchiveOutlineRegular, 'workspace.unarchive': IconUnarchiveOutlineRegular,
       'workspace.fork': IconBranchOutlineRegular, 'workspace.copy': IconCopyOutlineRegular,
     })) yield ctx.slots.register({ name: 'contextMenu.icon', key }, Icon)
   })
+  ctx.effect(() => ctx.contextMenus.register({
+    id: 'workspace.folders', target: 'workspace', order: 50,
+    resolve: ({ workspaceId, displayTitle }) => canManageFolders(workspaceId)
+      ? [{ id: 'manage-folders', label: ctx.locale.bind(NS)('folders.manage'), icon: { key: 'workspace.folders' },
+        run: () => { requestWorkspaceAction(workspaceId, displayTitle, 'manage-folders') } }] : [],
+  }), 'workspace: folder menu action')
   ctx.effect(() => ctx.contextMenus.register({
     id: 'workspace.rename', target: 'workspace', order: 100,
     resolve: ({ workspaceId, displayTitle }) => ctx.remoteAccess.source('workspace', workspaceId, 'workspace/rename').getSnapshot()
@@ -288,7 +305,10 @@ export function apply(ctx: Context): void {
         run: () => { requestWorkspaceAction(workspaceId, displayTitle, 'delete') } }] : [],
   }), 'workspace: delete menu action')
   const browserInjected = (): WorkspaceBrowserInjected => ({
-    settleWorkspaceAction: () => { workspaceActionRequest.set(null) },
+    settleWorkspaceAction: () => {
+      if (workspaceActionRequest.getSnapshot()?.action === 'manage-folders') shortcutControls.directoryBusy(false)
+      workspaceActionRequest.set(null)
+    },
     // Explicit group actions keep their target; unscoped New Session inherits
     // the current Session Workspace before the recent-Workspace fallback.
     startSession: (workspaceId, options) => { uiWorkspace.startSession(workspaceId, options) },
@@ -299,6 +319,9 @@ export function apply(ctx: Context): void {
     notifyArchivedNotOpenable: () => { notify({ kind: 'archivedNotOpenable' }) },
     renameWorkspace: async (workspaceId, title) => { await workspaces.rename(workspaceId, title) },
     deleteWorkspace: async (workspaceId) => { await workspaces.delete(workspaceId) },
+    addWorkspaceFolder: (workspaceId, path) => workspaces.addFolder(workspaceId, path),
+    removeWorkspaceFolder: (workspaceId, path) => workspaces.removeFolder(workspaceId, path),
+    notifyWorkspaceFolder: notify,
     insertWorkspaceBefore: async (workspaceId, beforeWorkspaceId) => {
       await workspaces.insertBefore(workspaceId, beforeWorkspaceId)
     },

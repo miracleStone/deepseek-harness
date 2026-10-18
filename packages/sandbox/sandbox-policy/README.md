@@ -54,7 +54,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Switching a session's mode
 
-A session's mode can be switched at runtime through a UI policy control or an explicit switch; the switch is recorded in the session log and takes effect on the session's next confined call. The switch survives restart through replay, and each session keeps its own mode — two sessions never see each other's state. A switched session keeps its immutable workspace cwd as the writable boundary.
+A session's mode can be switched at runtime through a UI policy control or an explicit switch; the switch is recorded in the session log and takes effect on the session's next confined call. The switch survives restart through replay, and each session keeps its own mode — two sessions never see each other's state. A switched Session keeps its immutable primary cwd and its recorded additional workspace roots as the writable directories.
 
 ### Failures and recovery
 
@@ -72,15 +72,15 @@ This section explains policy resolution, the per-session store, and the model-vi
 
 ### Resolution precedence
 
-`resolve({ session, mode })` returns one complete per-call policy: an approved explicit mode outranks the session's last `sandbox/mode` event, which outranks the deployment default. The session's immutable `cwd` supplies the workspace root; otherwise the configured fallback applies. Absolute execution-world spelling is preserved. Enforcing providers canonicalize the root on their own filesystem, so remote `symlink/..` paths are never resolved on the Harness host.
+`resolve({ session, mode })` returns one complete per-call policy: an approved explicit mode outranks the session's last `sandbox/mode` event, which outranks the deployment default. The Session's immutable `cwd` supplies the primary workspace root; otherwise the configured fallback applies. The `sandboxWorkspaceRoots` projection supplies additional canonical directories recorded by `sandbox/workspace-roots`; absent events mean no additional directories. With additional folders, the resolver removes directories already covered by another approved directory before filesystem resolution; the first retained directory becomes `workspaceRoot`. This prevents a replaceable nested path from redirecting an independent grant. The Session cwd and recorded folder list stay unchanged. Configured `additionalWritableRoots` remains a separate deployment grant list. Absolute execution-world spelling is preserved. Enforcing providers canonicalize the root on their own filesystem, so remote `symlink/..` paths are never resolved on the Harness host.
 
 ### The per-session store
 
-A runtime switch is one log-only `sandbox/mode` event on the session it applies to — the switch IS its event, and nothing mutates mode state out of band. `effective = explicit grant ?? fold(events) ?? deployment default`, so an override survives restart by replay and two sessions never see each other's state. Workspace identity needs no event: the immutable `SessionHeader.cwd` recorded at creation is the root for every call in that session. The event stays log-only; before each request, the owner contributes the current fact to the full runtime-context snapshot, and the agent loop logs that snapshot as a sourced `user/message`.
+A runtime switch is one log-only `sandbox/mode` event on the session it applies to — the switch IS its event, and nothing mutates mode state out of band. `effective = explicit grant ?? fold(events) ?? deployment default`, so an override survives restart by replay and two sessions never see each other's state. The immutable `SessionHeader.cwd` records the primary root. New multi-folder conversations record their additional approved directories during setup before execution; local delegation captures the same list, and resume or fork retains logged permissions rather than reading the mutable Workspace registration. The event stays log-only; before each request, the owner contributes the current fact to the full runtime-context snapshot, and the agent loop logs that snapshot as a sourced `user/message`.
 
 ### Model-visible text
 
-The `sandbox:policy` contribution states the mode's capability-neutral file-effect contract and the recorded session workspace and explicit extra directories under `workspace-write`. It does not enumerate mounted capabilities; tool plugins retain operation-specific denial and escalation guidance, approval policy contributes separately to the same snapshot, and plan guidance remains `dsh-plan-mode`'s system section.
+The `sandbox:policy` contribution states the mode's capability-neutral file-effect contract, every retained workspace directory, and explicit deployment grants under `workspace-write`. Multi-folder Sessions also receive a required `sandbox:workspace-folders` context listing their directories even when optional runtime context is disabled. Relative paths retain their current-working-directory semantics. It does not enumerate mounted capabilities; tool plugins retain operation-specific denial and escalation guidance, approval policy contributes separately to the same snapshot, and plan guidance remains `dsh-plan-mode`'s system section.
 
 ### Source map
 
@@ -88,6 +88,7 @@ The `sandbox:policy` contribution states the mode's capability-neutral file-effe
 |---|---|
 | [`src/index.ts`](src/index.ts) | Plugin entry: `SandboxPolicyService`, `Config` schema, policy resolution and context contribution |
 | [`src/session-mode.ts`](src/session-mode.ts) | The `sandbox/mode` event, its fold, and the write path |
+| [`src/workspace-roots.ts`](src/workspace-roots.ts) | Additional workspace-directory events and their write path |
 
 </details>
 
@@ -131,6 +132,18 @@ Current DSH file policy: workspace-write. Any available operation enforced by th
 Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: "<workspace root>". Additional writable directories: ["/repo/.git"]. Some platform temporary areas may also be writable.
 ```
 
+##### Workspace-write with multiple folders
+
+```markdown
+Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under these session workspace folders: ["<first write root>","<additional folder>"]. Some platform temporary areas may also be writable.
+```
+
+Multi-folder Sessions also receive this required context in every mode, including when optional runtime context is disabled:
+
+```markdown
+Session workspace folders: ["<session cwd>","<additional folder>"]. Relative paths and commands use the current working directory; use absolute paths for the other folders.
+```
+
 ##### Danger-full-access
 
 ```markdown
@@ -139,7 +152,7 @@ Current DSH file policy: danger-full-access. The DSH file sandbox does not restr
 
 #### Token effect
 
-One concise durable context message on the first request and each effective policy change; unchanged requests add nothing. `workspace-write` carries the recorded session workspace path and any explicit additional directories; platform-specific temporary paths are summarized without adding host-dependent bytes.
+One concise durable context message on the first request and each effective policy change; unchanged requests add nothing. `workspace-write` carries the retained workspace paths and explicit deployment grants; platform-specific temporary paths are summarized without adding host-dependent bytes.
 
 #### KV Cache effect
 
@@ -152,7 +165,8 @@ The stable system prompt remains byte-identical across mode changes. A changed f
 
 These limits define the policy surface this package provides. They are current package constraints, not a general sandbox comparison or a task backlog.
 
-- **Deployment-scoped extra grants** — additional directories come from configuration; they are not per-session permission settings. Backend support is defined by [sandbox-local](../sandbox-local/README.md).
+- **Deployment-scoped extra grants** — `additionalWritableRoots` comes from configuration, independently of Session-local workspace folders; it is not a per-session permission setting. Backend support is defined by [sandbox-local](../sandbox-local/README.md).
+- **Folder permissions are Session-local** — editing a Workspace registration affects new conversations only. Existing Sessions retain their recorded directory permissions.
 - **File-effect modes only** — `SandboxMode` governs file effects; network and process policy are outside its vocabulary, so no knob here restricts them.
 - **Temporary areas are deliberately summarized** — enforcing backends grant different platform temporary areas, which are selected after policy resolution and therefore cannot be enumerated truthfully in the current context.
 

@@ -2086,6 +2086,10 @@ Delegate a self-contained task to a subagent (a separate agent that works in its
     "prompt": {
       "type": "string",
       "description": "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
+    },
+    "reasoning_effort": {
+      "type": "string",
+      "description": "Model-specific reasoning effort id."
     }
   },
   "required": [

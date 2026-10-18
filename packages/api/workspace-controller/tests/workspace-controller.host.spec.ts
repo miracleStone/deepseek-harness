@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -58,7 +58,8 @@ async function harness(options: { systemDocuments?: boolean } = {}) {
   roots.push(ctx)
   await ctx.plugin(SessionStore)
   await ctx.plugin(Storage)
-  ctx.storage.backend.register('memory', new MemoryStorageBackend())
+  const backend = new MemoryStorageBackend()
+  ctx.storage.backend.register('memory', backend)
   const storageDomain = new DomainFacility(ctx, { backend: 'memory', routes: {} })
   ctx.storage.mount('domain', storageDomain)
   ctx.provide('storageDomain', storageDomain)
@@ -72,7 +73,7 @@ async function harness(options: { systemDocuments?: boolean } = {}) {
   } as never)
   new RemoteAccessService(ctx)
   const controller = new WorkspaceController(ctx, options.systemDocuments === true ? {} : { documentsDirectory: root })
-  return { controller, ctx, root, storageDomain }
+  return { controller, ctx, root, storageDomain, pool: backend.pool }
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
@@ -206,6 +207,50 @@ describe('WorkspaceController commands', () => {
       .rejects.toBe(unpinFailure)
   })
 
+  it('adds canonical folders and maps only declared folder failures while preserving storage errors', async () => {
+    const { controller, ctx, root, pool } = await harness()
+    const primary = stageDir(root, 'folder-primary')
+    const extra = stageDir(root, 'folder-extra')
+    const alias = join(root, 'folder-alias')
+    symlinkSync(extra, alias, 'junction')
+    const created = await controller.create({ path: primary })
+    const workspaceId = created.workspace.workspaceId
+    expect(created.workspace).not.toHaveProperty('additionalPaths')
+    await expect(controller.addFolder({ workspaceId, path: alias }))
+      .resolves.toMatchObject({ workspace: { path: primary, additionalPaths: [extra] } })
+    await expect(controller.addFolder({ workspaceId, path: primary }))
+      .resolves.toMatchObject({ workspace: { additionalPaths: [extra] } })
+    const file = join(root, 'plain-folder-file')
+    writeFileSync(file, 'not a directory')
+    for (const path of ['.', '', join(root, 'missing-folder'), file]) {
+      await expect(controller.addFolder({ workspaceId, path })).rejects.toMatchObject({
+        code: 'workspace/invalid-path', details: { path },
+      })
+    }
+    await expect(controller.removeFolder({ workspaceId, path: primary }))
+      .rejects.toMatchObject({ code: 'gateway/bad-request' })
+    await expect(controller.removeFolder({ workspaceId, path: '.' }))
+      .rejects.toMatchObject({ code: 'workspace/invalid-path' })
+    await expect(controller.addFolder({ workspaceId: 'unknown' as WorkspaceId, path: extra }))
+      .rejects.toMatchObject({ code: 'workspace/not-found' })
+    await expect(controller.removeFolder({ workspaceId: 'unknown' as WorkspaceId, path: extra }))
+      .rejects.toMatchObject({ code: 'workspace/not-found' })
+
+    pool.failNextWrites = 1
+    const failedRemoval = controller.removeFolder({ workspaceId, path: extra })
+    await expect(failedRemoval).rejects.toThrow('injected write failure')
+    await expect(failedRemoval).rejects.not.toBeInstanceOf(RemoteError)
+    expect(ctx.workspaceRegistry.get(workspaceId)!.additionalPaths).toEqual([extra])
+    await controller.removeFolder({ workspaceId, path: extra })
+    pool.failNextWrites = 1
+    const failedAddition = controller.addFolder({ workspaceId, path: extra })
+    await expect(failedAddition).rejects.toThrow('injected write failure')
+    await expect(failedAddition).rejects.not.toBeInstanceOf(RemoteError)
+    expect(ctx.workspaceRegistry.get(workspaceId)!.additionalPaths).toEqual([])
+    await expect(controller.addFolder({ workspaceId, path: extra }))
+      .resolves.toMatchObject({ workspace: { additionalPaths: [extra] } })
+  })
+
   it('resolves queued Workspace identities when their operation starts', async () => {
     const { controller, ctx, root } = await harness()
     const target = await controller.create({ path: stageDir(root, 'target') })
@@ -224,10 +269,14 @@ describe('WorkspaceController commands', () => {
       workspaceId: target.workspace.workspaceId,
       title: 'must-not-land',
     })
+    const staleAddition = controller.addFolder({ workspaceId: target.workspace.workspaceId, path: blockerPath })
+    const staleRemoval = controller.removeFolder({ workspaceId: target.workspace.workspaceId, path: blockerPath })
     gate.resolve(undefined)
     await blocker
     await expect(deletion).resolves.toEqual({ deleted: true })
     await expect(staleRename).rejects.toMatchObject({ code: 'workspace/not-found' })
+    await expect(staleAddition).rejects.toMatchObject({ code: 'workspace/not-found' })
+    await expect(staleRemoval).rejects.toMatchObject({ code: 'workspace/not-found' })
   })
 
   it('reorders Workspaces and Sessions and archives only known Sessions', async () => {
@@ -443,6 +492,39 @@ describe('WorkspaceController follow', () => {
 
     abort.abort()
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
+  })
+
+  it('streams folder baselines and committed upserts while omitting empty extra folder fields', async () => {
+    const { controller, ctx, root, pool } = await harness()
+    const primary = stageDir(root, 'folder-stream-primary')
+    const extra = stageDir(root, 'folder-stream-extra')
+    const { workspace } = await controller.create({ path: primary })
+    const abort = new AbortController()
+    const iterator = controller.follow(abort.signal)[Symbol.asyncIterator]()
+    try {
+      const opening = await nextFrame(iterator)
+      expect(opening).toMatchObject({ type: 'baseline', value: { items: [{ path: primary }] } })
+      if (opening.type !== 'baseline') throw new Error('expected opening baseline')
+      expect(opening.value.items[0]).not.toHaveProperty('additionalPaths')
+      const added = await controller.addFolder({ workspaceId: workspace.workspaceId, path: extra })
+      await expect(nextFrame(iterator)).resolves.toEqual({ type: 'upsert', workspace: added.workspace })
+      expect(added.workspace.additionalPaths).toEqual([extra])
+      const feed = new WorkspaceFeed(ctx)
+      expect(feed.baseline().items[0]?.additionalPaths).toEqual([extra])
+
+      pool.failNextWrites = 1
+      await expect(controller.removeFolder({ workspaceId: workspace.workspaceId, path: extra }))
+        .rejects.toThrow('injected write failure')
+      await expect(controller.removeFolder({ workspaceId: workspace.workspaceId, path: primary }))
+        .rejects.toMatchObject({ code: 'gateway/bad-request' })
+      rmSync(extra, { recursive: true })
+      const removed = await controller.removeFolder({ workspaceId: workspace.workspaceId, path: extra })
+      expect(removed.workspace).not.toHaveProperty('additionalPaths')
+      await expect(nextFrame(iterator)).resolves.toEqual({ type: 'upsert', workspace: removed.workspace })
+    } finally {
+      abort.abort()
+      await iterator.return?.()
+    }
   })
 
   it('follows only the Workspaces and Sessions a non-owner may follow', async () => {

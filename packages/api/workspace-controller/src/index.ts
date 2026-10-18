@@ -10,6 +10,7 @@ import { DirectoryPickerController } from './directory-picker.ts'
 import { WorkspaceFeed, workspaceView } from './feed.ts'
 import { defaultWorkspaceDirectory, validateDocumentsDirectory } from './default-directory.ts'
 import type {
+  WorkspaceAddFolderRequest,
   WorkspaceArchiveSessionRequest,
   WorkspaceArchiveValue,
   WorkspaceBaseline,
@@ -25,6 +26,7 @@ import type {
   WorkspacePinSessionRequest,
   WorkspacePinValue,
   WorkspaceRenameRequest,
+  WorkspaceRemoveFolderRequest,
   WorkspaceUnarchiveSessionRequest,
   WorkspaceUnpinSessionRequest,
   WorkspaceValue,
@@ -119,6 +121,26 @@ export class WorkspaceController extends TypertRemoteService {
   @Remote('rename')
   rename(request: WorkspaceRenameRequest): Promise<WorkspaceValue> {
     return this.commands.rename(request)
+  }
+
+  /**
+   * Add an existing directory to one Workspace, deduplicated by canonical realpath.
+   * @param request - Workspace identity and fully qualified directory path.
+   * @returns the committed Workspace projection; invalid paths leave it unchanged.
+   */
+  @Remote('addFolder')
+  addFolder(request: WorkspaceAddFolderRequest): Promise<WorkspaceValue> {
+    return this.commands.addFolder(request)
+  }
+
+  /**
+   * Remove an extra directory without requiring it to exist; never removes the primary path.
+   * @param request - Workspace identity and extra directory path.
+   * @returns the committed Workspace projection.
+   */
+  @Remote('removeFolder')
+  removeFolder(request: WorkspaceRemoveFolderRequest): Promise<WorkspaceValue> {
+    return this.commands.removeFolder(request)
   }
 
   /**

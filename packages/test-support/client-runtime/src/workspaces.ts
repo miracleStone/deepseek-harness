@@ -105,6 +105,44 @@ export class TestWorkspaces implements IWorkspaces {
   }
 
   /**
+   * Add a folder (recorded). The default echoes a row without publishing list changes.
+   * @param workspaceId - target Workspace.
+   * @param path - extra folder path.
+   * @returns the echoed or stubbed Workspace view.
+   */
+  async addFolder(workspaceId: WorkspaceId, path: string): Promise<WorkspaceView> {
+    this.calls.push({ method: 'addFolder', args: [workspaceId, path] })
+    const stub = this.stubs.get('addFolder')
+    if (stub !== undefined) return await (stub(workspaceId, path) as Promise<WorkspaceView>)
+    const view = this.folderView(workspaceId)
+    const folders = view.additionalPaths ?? []
+    return path === view.path || folders.includes(path)
+      ? view : { ...view, additionalPaths: [...folders, path] }
+  }
+
+  /**
+   * Remove a folder (recorded). The default echoes a row without publishing list changes.
+   * @param workspaceId - target Workspace.
+   * @param path - extra folder path.
+   * @returns the echoed or stubbed Workspace view.
+   */
+  async removeFolder(workspaceId: WorkspaceId, path: string): Promise<WorkspaceView> {
+    this.calls.push({ method: 'removeFolder', args: [workspaceId, path] })
+    const stub = this.stubs.get('removeFolder')
+    if (stub !== undefined) return await (stub(workspaceId, path) as Promise<WorkspaceView>)
+    const { additionalPaths, ...view } = this.folderView(workspaceId)
+    const folders = (additionalPaths ?? []).filter(folder => folder !== path)
+    return folders.length === 0 ? view : { ...view, additionalPaths: folders }
+  }
+
+  private folderView(workspaceId: WorkspaceId): WorkspaceView {
+    return this.list.getSnapshot().items.find(view => view.workspaceId === workspaceId) ?? {
+      workspaceId, title: '', path: '', sessionIds: [],
+      createdAt: '1970-01-01T00:00:00.000Z', updatedAt: '1970-01-01T00:00:00.000Z',
+    }
+  }
+
+  /**
    * Delete a Workspace (recorded; default no-op).
    * @param workspaceId - target workspace.
    */

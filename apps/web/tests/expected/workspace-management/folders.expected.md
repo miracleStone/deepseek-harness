@@ -1,0 +1,14 @@
+- dialog "Manage workspace folders":
+  - heading "Manage workspace folders" [level=2]
+  - button "Close"
+  - paragraph: Folder changes apply to new conversations only. Existing conversations keep their directory permissions.
+  - paragraph: Multi-folder project
+  - list "Folders in Multi-folder project":
+    - 'listitem "Primary folder (cannot remove): {{primary}}"': Primary folder · cannot remove {{primary}}
+    - listitem "{{additional}}":
+      - text: {{additional}}
+      - 'button "Remove folder from workspace: {{additional}}"'
+  - paragraph: Removing a folder only unlinks it; files on disk are not deleted.
+  - status
+  - button "Add folder"
+  - button "Close"

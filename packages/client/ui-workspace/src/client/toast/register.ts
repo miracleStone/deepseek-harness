@@ -21,6 +21,17 @@ export function registerToasts(
   })
   ctx.slots.registerFactory({ name: 'workspace.toast.content', scope: 'root' }, WorkspaceToast)
   ctx.slots.inject('workspace.toast', function* () {
+    for (const kind of ['folderAdded', 'folderRemoved', 'folderAddFailed', 'folderRemoveFailed', 'folderPickerFailed'] as const) {
+      yield ctx.slots.register({
+        name: 'workspace.toast', key: kind, locale: 'workspace',
+        inject: (): ToastDisplayInjected<typeof kind> => ({
+          display: (_notice, t) => ({
+            text: t(`toast.${kind}`),
+            tone: kind === 'folderAdded' || kind === 'folderRemoved' ? 'success' : 'warning',
+          }),
+        }),
+      }, ToastEntry<PropsRuntime<'workspace.toast', typeof kind>>)
+    }
     yield ctx.slots.register({
       name: 'workspace.toast', key: 'sessionIdCopied', locale: 'workspace',
       inject: (): ToastDisplayInjected<'sessionIdCopied'> => ({

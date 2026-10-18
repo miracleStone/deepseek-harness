@@ -88,13 +88,15 @@ function assertNonEmpty(value: string | undefined, field: keyof DelegationModelR
 
 /**
  * Validate explicit selection against the Session policy and merge it over child defaults.
- * Explicit selection requires both provider and model; an omitted effort then
+ * Explicit route selection requires both provider and model; an omitted effort then
  * uses the selected model's default, even when the route is unchanged.
+ * Effort-only selection validates the effective configured or parent route.
  * @param configured - Tool-instance child defaults.
  * @param request - Model-facing route override.
- * @param enabled - Whether this tool instance permits model-facing selection.
+ * @param enabled - Whether this tool instance permits model-facing route selection.
  * @param policy - Session allowlist; omission permits only the current parent route.
- * @param parentOptions - Current parent route used when no policy is recorded.
+ * @param parentOptions - Current parent route used for fallback and authorization.
+ * @param effortEnabled - Whether effort-only overrides are permitted without route selection.
  * @returns Child Agent options, preserving omission when no layer contributes one.
  */
 export function requestedAgentOptions(
@@ -103,18 +105,32 @@ export function requestedAgentOptions(
   enabled: boolean,
   policy: ModelSelectionPolicy | undefined,
   parentOptions: AgentOptions,
+  effortEnabled: boolean,
 ): AgentOptions | undefined {
   if (!hasDelegationModelRequest(request)) return configured
-  if (!enabled) {
+  if (!enabled && (request.provider !== undefined || request.model !== undefined)) {
     throw new Error('child model selection is disabled for this tool instance')
+  }
+  if (!enabled && !effortEnabled && request.reasoning_effort !== undefined) {
+    throw new Error('child reasoning effort selection is disabled for this tool instance')
   }
   assertNonEmpty(request.provider, 'provider')
   assertNonEmpty(request.model, 'model')
   assertNonEmpty(request.reasoning_effort, 'reasoning_effort')
+  if (request.reasoning_effort !== undefined && request.provider === undefined && request.model === undefined) {
+    const provider = configured?.provider ?? parentOptions.provider
+    const model = configured?.model ?? parentOptions.model
+    if (provider === undefined || model === undefined) {
+      throw new Error('cannot select child LLM values without an effective provider and model')
+    }
+    assertAllowedModelSelection(policy, parentOptions, { provider, model })
+    return {
+      ...configured,
+      reasoningEffort: ReasoningEffortId(request.reasoning_effort),
+    }
+  }
   if (request.provider === undefined || request.model === undefined) {
-    throw new Error(request.reasoning_effort === undefined
-      ? 'child LLM `provider` and `model` must be supplied together'
-      : 'child LLM `reasoning_effort` requires both `provider` and `model`; supply both or omit all three fields')
+    throw new Error('child LLM `provider` and `model` must be supplied together')
   }
 
   assertAllowedModelSelection(policy, parentOptions, { provider: request.provider, model: request.model })

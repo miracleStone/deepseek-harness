@@ -63,6 +63,13 @@ export interface Config extends PresetSelectionConfig {
    */
   modelDiscovery?: boolean
   /**
+   * Allow per-call reasoning_effort without changing the child provider/model
+   * (default true). Exposed only by providers supporting child Agent options.
+   * Model selection independently permits effort selection. Explicit effort
+   * choices enforce the same Session route policy as provider/model choices.
+   */
+  enableReasoningEffort?: boolean
+  /**
    * Agent options applied to every child; omitted fields use child-loop defaults.
    */
   agentOptions?: AgentOptions
@@ -84,6 +91,7 @@ export const Config: z<Config> = z.object({
   toolName: z.string().default('subagent'),
   modelSelection: z.boolean().default(false),
   modelDiscovery: z.boolean().default(false),
+  enableReasoningEffort: z.boolean().default(true),
   // Prevent Schemastery from materializing omitted agentOptions as `{}`.
   agentOptions: z.object({
     provider: z.string(),
@@ -200,10 +208,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   const mount = (subagentProvider: SubagentProvider): void => {
     assertSubagentProviderConfiguration(subagentProvider)
     const wording = providerWording(subagentProvider.inheritsParentContext)
+    const effortSelectionEnabled = modelSelectionEnabled
+      || (config.enableReasoningEffort !== false && subagentProvider.capabilities.agentOptions)
+    const effortDescription = effortSelectionEnabled
+      ? ' Set `reasoning_effort` per child to choose its thinking intensity without changing its provider or model. Use a lower supported effort for simple tasks and a higher supported effort for difficult analysis. Effort ids are model-specific; unsupported values fail before the child starts. Omit it to preserve compatible configured/parent defaults.'
+      : ''
     const providerRouteDefaults = subagentProvider.agentRouteDefaults
     const selectionDescription = providerRouteDefaults !== undefined
-      ? ' Omit `provider`, `model`, and `reasoning_effort` to use child defaults, falling back to this backend\'s route defaults.'
-      : ' Omit `provider`, `model`, and `reasoning_effort` to use child defaults, falling back to compatible parent values.'
+      ? ' Omit `provider`, `model`, and `reasoning_effort` to use child defaults, falling back to this backend\'s route defaults. Supply `provider` and `model` together; an explicit pair without `reasoning_effort` uses the selected model\'s default, even when the route is unchanged.'
+      : ' Omit `provider`, `model`, and `reasoning_effort` to use child defaults, falling back to compatible parent values. Supply `provider` and `model` together; an explicit pair without `reasoning_effort` uses the selected model\'s default, even when the route is unchanged.'
     const definition = defineTool({
       name: toolName,
       description: wording.description
@@ -211,6 +224,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         + (subagentProvider.prepareContinuable !== undefined
           ? ' Use `send_message` to steer it while running or continue its conversation after it finishes.'
           : ' This backend does not accept follow-up messages.')
+        + effortDescription
         + (modelSelectionEnabled ? selectionDescription : '')
         + (modelSelectionEnabled && subagentProvider.inheritsParentContext
           ? ' Changing the route can prevent provider-side reuse of the inherited conversation prefix.'
@@ -252,9 +266,11 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
             type: 'string' as const,
             description: 'Model id within that provider; requires `provider`.',
           },
+        } : {},
+        ...effortSelectionEnabled ? {
           reasoning_effort: {
             type: 'string' as const,
-            description: 'Reasoning effort id; requires `provider` and `model`. Omit to use the selected model\'s default, even when it matches the parent or configured route.',
+            description: 'Model-specific reasoning effort id.',
           },
         } : {},
       },
@@ -294,13 +310,15 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
           modelSelectionEnabled,
           modelSelectionPolicy,
           parentOptions,
+          effortSelectionEnabled,
         )
         if (requiresRoutePreflight) {
           const llm = ctx.get('llm')
           if (llm === undefined) {
             throw new Error('cannot resolve the selected child LLM route because the `llm` service is unavailable')
           }
-          const inheritParentReasoningEffort = providerRouteDefaults === undefined && !hasDelegationModelRequest(modelRequest)
+          const inheritParentReasoningEffort = providerRouteDefaults === undefined
+            && modelRequest.provider === undefined && modelRequest.model === undefined
           await preflightChildLlmRoute(
             llm,
             parentOptions,

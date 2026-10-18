@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-使用 `dsh-sandbox`，可以让子进程及其派生的所有进程在逐调用文件访问策略下运行。命令可以禁止写入（`read-only`）、只写入工作区（`workspace-write`），或不受限制地运行（`danger-full-access`）。无法强制执行所请求的模式时，调用以 `SANDBOX_UNAVAILABLE` 失败，绝不会不受限制地运行。调用被拒绝后，模型可以请求一个严格更宽的模式，交由人类批准一次。这种限制只适用于与宿主共享内核和文件系统的进程；需要隔离整个环境时，请使用容器、microVM 或远程执行器。
+使用 `dsh-sandbox`，可以让子进程及其派生的所有进程在逐调用文件访问策略下运行。命令可以禁止写入（`read-only`）、只写入工作区根目录（`workspace-write`），或不受限制地运行（`danger-full-access`）。无法强制执行所请求的模式时，调用以 `SANDBOX_UNAVAILABLE` 失败，绝不会不受限制地运行。调用被拒绝后，模型可以请求一个严格更宽的模式，交由人类批准一次。这种限制只适用于与宿主共享内核和文件系统的进程；需要隔离整个环境时，请使用容器、microVM 或远程执行器。
 
 ## 目录
 
@@ -56,8 +56,10 @@ kind: "package-reference"
 | 模式 | 效果 |
 |---|---|
 | `read-only` | 拒绝写入，必需 sink（如 `/dev/null`）除外 |
-| `workspace-write` | 允许写入工作区根目录、显式配置的额外根目录及后端定义的临时区域 |
+| `workspace-write` | 允许写入主工作区和额外工作区根目录、显式额外目录及后端定义的临时区域 |
 | `danger-full-access` | 绕过隔离；消费方直接 spawn 原始 argv |
+
+`SandboxExecutionPolicy.workspaceRoot` 指定第一个获准写入的根目录。可选的 `additionalWorkspaceRoots` 指定其他绝对工作区目录；省略时不增加目录。独立的 `additionalWritableRoots` 携带部署方选择的物理目录授权。执行限制的主机在每次调用时拒绝不存在、非目录或经过符号链接的部署授权路径。`read-only` 不授予这些根目录中的任何一个，`danger-full-access` 则不论列表内容如何都绕过隔离。
 
 强制执行逐调用报告：`full` 表示后端管辖模式承诺的每个文件操作，`partial` 表示活动后端或较旧的内核 ABI 只管辖子集——Windows ACL 档与较旧的 Landlock ABI 是当前的部分强制执行情形，需要绝对边界的消费方可以拒绝或向上暴露它们。
 
@@ -100,7 +102,7 @@ kind: "package-reference"
 
 ### 可写根目录
 
-`workspaceWritableRoots` 为 bwrap 和 Landlock 推导工作区与显式额外目录。`writableRoots` 为 Seatbelt 和进程内文件系统围栏加入主机临时区域。两者都对根目录去重，并拒绝不存在、不是目录或经过符号链接解析的额外路径。参见[模式定义](../../../docs/subsystems/sandbox.zh.md)。
+`workspaceWritableRoots` 为 bwrap 和 Landlock 合并工作区目录与显式部署授权。`writableRoots` 为 Seatbelt 和进程内文件系统围栏加入主机临时区域。两者都会规范化并去重工作区根目录，同时拒绝不存在、非目录或经过符号链接解析的部署授权路径。参见[模式定义](../../../docs/subsystems/sandbox.zh.md)。
 
 </details>
 

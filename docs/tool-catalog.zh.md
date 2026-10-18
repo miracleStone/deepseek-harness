@@ -2092,6 +2092,10 @@ subagent_oar 工具在为外部提供方配置的别名之间选择。本目录�
     "prompt": {
       "type": "string",
       "description": "The complete, self-contained task for the subagent. It does not share this conversation's context, so include everything it needs."
+    },
+    "reasoning_effort": {
+      "type": "string",
+      "description": "Model-specific reasoning effort id."
     }
   },
   "required": [

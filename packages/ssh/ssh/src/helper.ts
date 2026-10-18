@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import type { Readable, Writable } from 'node:stream'
 import { Context } from '@deepseek-ai/cordis'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { FsError, type FsTarget, type FsWriteIntent, type FsVersion } from '@deepseek-ai/dsh-fs'
+import { FsError, type FileSystem, type FsTarget, type FsWriteIntent, type FsVersion } from '@deepseek-ai/dsh-fs'
 import { SandboxedFileSystem } from '@deepseek-ai/dsh-fs-sandbox'
 import type {} from '@deepseek-ai/dsh-subprocess'
 import { LocalSubprocessRuntime } from '@deepseek-ai/dsh-subprocess-local'
@@ -33,6 +33,45 @@ async function services() {
   fibers.push(await ctx.plugin(LocalSubprocessRuntime))
   fibers.push(await ctx.plugin(LocalSandboxProvider))
   return { ctx, close: async () => { for (const fiber of fibers.reverse()) await fiber.dispose() } }
+}
+
+/**
+ * Resolve a wire policy in the helper's filesystem, never the SSH client's.
+ * With additional workspace roots, every workspace must exist as a directory before any effect.
+ * Deployment grants keep their spelling so enforcing providers can reject symlinked paths.
+ * @param fs - the helper's filesystem resolver and metadata provider.
+ * @param raw - the policy received over authenticated helper RPC.
+ * @param signal - cancellation for each remote filesystem operation.
+ * @returns the canonical, deduplicated policy; rejects invalid JSON, missing roots, or non-directories.
+ */
+export async function resolveHelperPolicy(
+  fs: Pick<FileSystem, 'resolve' | 'processPath' | 'stat'>,
+  raw: unknown,
+  signal: AbortSignal,
+): Promise<SandboxExecutionPolicy> {
+  const parsed = policySchema.parse(raw)
+  const target = await fs.resolve(parsed.workspaceRoot, { signal })
+  const workspaceRoot = fs.processPath(target)
+  const resolved: SandboxExecutionPolicy = {
+    mode: parsed.mode, workspaceRoot,
+    ...parsed.additionalWritableRoots === undefined ? {} : { additionalWritableRoots: parsed.additionalWritableRoots },
+    ...parsed.sessionId === undefined ? {} : { sessionId: brandString<NonNullable<SandboxExecutionPolicy['sessionId']>>(parsed.sessionId) },
+  }
+  if (parsed.additionalWorkspaceRoots === undefined) return resolved
+  const requireDirectory = async (target: FsTarget, path: string): Promise<void> => {
+    const info = await fs.stat(target, signal)
+    if (info === undefined) throw new FsError(`SSH workspace root does not exist: ${path}`, 'FS_NOT_FOUND')
+    if (info.type !== 'directory') throw new FsError(`SSH workspace root is not a directory: ${path}`, 'FS_NOT_DIRECTORY')
+  }
+  await requireDirectory(target, parsed.workspaceRoot)
+  const roots = new Set<string>()
+  for (const path of parsed.additionalWorkspaceRoots) {
+    const target = await fs.resolve(path, { signal })
+    await requireDirectory(target, path)
+    const root = fs.processPath(target)
+    if (root !== workspaceRoot) roots.add(root)
+  }
+  return { ...resolved, additionalWorkspaceRoots: [...roots] }
 }
 
 /** The private helper's authenticated transport and process lifetime. */
@@ -85,17 +124,6 @@ export async function runSshHelper(transport: HelperTransport): Promise<void> {
   const touchLease = (): void => {
     if (lease !== undefined) clearTimeout(lease)
     lease = setTimeout(() => { peer.close(new Error('SSH helper client lease expired')) }, leaseMs)
-  }
-  const policy = async (raw: unknown, signal: AbortSignal): Promise<SandboxExecutionPolicy> => {
-    const parsed = policySchema.parse(raw)
-    const { sessionId, additionalWritableRoots: additional, ...fields } = parsed
-    const target = await ctx.fs.resolve(parsed.workspaceRoot, { signal })
-    return {
-      ...fields,
-      workspaceRoot: ctx.fs.processPath(target),
-      ...additional === undefined ? {} : { additionalWritableRoots: additional },
-      ...sessionId === undefined ? {} : { sessionId: brandString<NonNullable<SandboxExecutionPolicy['sessionId']>>(sessionId) },
-    }
   }
   const asTarget = (raw: unknown): FsTarget => targetSchema.parse(raw) as FsTarget
   const peer = new SshRpcPeer(transport.input, transport.output, MAX_FRAME_BYTES, 128, async (method, raw, requestSignal) => {
@@ -155,7 +183,7 @@ export async function runSshHelper(transport: HelperTransport): Promise<void> {
     }
     if (method === 'sandbox') {
       const input = z.object({ argv: z.array(z.string()).min(1), policy: policySchema }).strict().parse(raw)
-      const resolved = await policy(input.policy, signal)
+      const resolved = await resolveHelperPolicy(ctx.fs, input.policy, signal)
       if (resolved.mode === 'danger-full-access') throw new Error('Unconfined argv does not need a sandbox wrapper')
       return ctx.sandbox.confine(input.argv, resolved as SandboxPolicy, signal)
     }
@@ -238,7 +266,7 @@ export async function runSshHelper(transport: HelperTransport): Promise<void> {
         expected: z.union([intentSchema, z.object({ version: z.string() }).strict()]).optional(), policy: policySchema,
       }).strict().parse(raw)
       const target = asTarget(input.target)
-      const resolved = await policy(input.policy, signal)
+      const resolved = await resolveHelperPolicy(ctx.fs, input.policy, signal)
       if (method === 'fs.write') return ctx.fs.writeText(
         target, z.string().parse(input.content),
         input.expected === undefined ? undefined : intentSchema.parse(input.expected) as FsWriteIntent, signal, resolved,

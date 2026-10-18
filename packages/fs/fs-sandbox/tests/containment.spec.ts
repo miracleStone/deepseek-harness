@@ -3,7 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, parse } from 'node:path'
 import { isPathUnder } from '../src/containment.ts'
@@ -34,8 +34,12 @@ describe('filesystem sandbox containment', () => {
     const realRoot = join(base, 'real')
     const aliasRoot = join(base, 'alias')
     await mkdir(realRoot)
-    await symlink(realRoot, aliasRoot)
-    expect(await isPathUnder(join(await realpath(realRoot), 'missing', 'file.txt'), aliasRoot)).toBe(true)
+    await symlink(realRoot, aliasRoot, 'junction')
+    try {
+      expect(await isPathUnder(join(await realpath(realRoot), 'missing', 'file.txt'), aliasRoot)).toBe(true)
+    } finally {
+      await unlink(aliasRoot)
+    }
   })
 
   it('denies unrelated and missing roots', async () => {

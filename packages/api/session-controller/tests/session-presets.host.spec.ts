@@ -8,6 +8,7 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { Agent, AgentFactory } from '@deepseek-ai/dsh-agent'
 import { agentPresetProjectionDefinition } from '@deepseek-ai/dsh-agent-preset-registry'
+import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionStore, { SESSION_FORMAT_VERSION, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
 import type { Session, SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
@@ -54,6 +55,8 @@ interface HarnessOptions {
   readonly resolving?: ReadonlyMap<string, Promise<void>>
   /** Workspace placement served to `workspaceId` requests. */
   readonly workspace?: { readonly members: readonly SessionId[]; readonly archived: readonly SessionId[] }
+  /** Extra folders selected for newly created Workspace conversations. */
+  readonly additionalPaths?: readonly string[]
 }
 
 const WORKSPACE = 'workspace-1' as WorkspaceId
@@ -115,7 +118,10 @@ async function harness(options: HarnessOptions = {}) {
     },
   }) as never)
   const { members, archived } = options.workspace ?? { members: [], archived: [] }
-  const workspace = { id: WORKSPACE, path: cwd, sessionIds: members, attachSession: () => Promise.resolve() }
+  const workspace = {
+    id: WORKSPACE, path: cwd, additionalPaths: options.additionalPaths ?? [],
+    sessionIds: members, attachSession: () => Promise.resolve(),
+  }
   ctx.provide('workspaceRegistry', {
     get: (id: WorkspaceId) => id === WORKSPACE ? workspace : undefined,
     list: () => [workspace],
@@ -172,6 +178,7 @@ async function harness(options: HarnessOptions = {}) {
     defaultModelSelection: () => ({ provider: 'test', model: 'test-model' }),
     cwd,
   })
+  await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write' })
   const presetOf = (id: SessionId): string | null | undefined => {
     const session = ctx.sessions.get(id)
     return session === undefined ? undefined : preset.stateOf(session)
@@ -182,7 +189,7 @@ async function harness(options: HarnessOptions = {}) {
       .filter(event => event.type === 'agent-preset/selected')
       .map(event => event.data)
   }
-  return { ctx, remote, cwd, selections, resumed, presetOf, selectedEvents }
+  return { ctx, remote, cwd, workspace, selections, resumed, presetOf, selectedEvents }
 }
 
 function storedHeader(id: SessionId, cwd: string, extra: Partial<SessionHeader> = {}): SessionHeader {
@@ -203,6 +210,65 @@ function completedTurn(seq: number): SessionEvent[] {
     { type: 'turn/end', seq: SessionSeq(seq + 1), time: 2, data: { turn: 1, reason: { kind: 'completed' } } },
   ]
 }
+
+describe('session.create Workspace folders', () => {
+  it('captures every selected folder before publication and keeps old conversations unchanged', async () => {
+    const extra = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-extra-workspace-')))
+    tempDirs.push(extra)
+    const { ctx, remote, workspace, cwd } = await harness({ additionalPaths: [extra] })
+    const created = await remote.create({ sessionId: SessionId('multi-folder'), workspaceId: WORKSPACE })
+    expect(created).toMatchObject({ ok: true, value: { sessionId: 'multi-folder' } })
+    const original = ctx.sessions.get(SessionId('multi-folder'))
+    if (original === undefined) throw new Error('Session was not published')
+    expect(original.header.cwd).toBe(cwd)
+    expect(ctx.sandboxPolicy.resolve({ session: original })).toMatchObject({ additionalWorkspaceRoots: [extra] })
+    expect(original.snapshotEvents()).toContainEqual(expect.objectContaining({
+      type: 'sandbox/workspace-roots', data: { additionalWorkspaceRoots: [extra] },
+    }))
+
+    workspace.additionalPaths = []
+    const next = await remote.create({ sessionId: SessionId('single-folder'), workspaceId: WORKSPACE })
+    expect(next.ok).toBe(true)
+    const current = ctx.sessions.get(SessionId('single-folder'))
+    if (current === undefined) throw new Error('New Session was not published')
+    expect(ctx.sandboxPolicy.resolve({ session: current })).not.toHaveProperty('additionalWorkspaceRoots')
+    expect(ctx.sandboxPolicy.additionalRootsOf(original)).toEqual([extra])
+  })
+
+  it('mints a fresh Session rather than changing the grants of a reused blank conversation', async () => {
+    const { ctx, remote, workspace, cwd } = await harness({
+      workspace: { members: [SessionId('blank-folder')], archived: [] },
+    })
+    await remote.create({ sessionId: SessionId('blank-folder'), workspaceId: WORKSPACE })
+    const original = ctx.sessions.get(SessionId('blank-folder'))
+    if (original === undefined) throw new Error('Blank Session was not published')
+    workspace.additionalPaths = [join(cwd, 'additional')]
+    const response = await remote.create({ sessionId: original.id, workspaceId: WORKSPACE })
+    if (!response.ok) throw response.error
+    expect(response.value.sessionId).not.toBe(original.id)
+    expect(ctx.sandboxPolicy.additionalRootsOf(original)).toEqual([])
+    const fresh = ctx.sessions.get(response.value.sessionId)
+    if (fresh === undefined) throw new Error('Replacement Session was not published')
+    expect(ctx.sandboxPolicy.additionalRootsOf(fresh)).toEqual(workspace.additionalPaths)
+  })
+
+  it('records folders when a nonblank named Session is replaced', async () => {
+    const { ctx, remote, workspace, cwd } = await harness()
+    await remote.create({ sessionId: SessionId('started-folder'), workspaceId: WORKSPACE })
+    const original = ctx.sessions.get(SessionId('started-folder'))
+    if (original === undefined) throw new Error('Session was not published')
+    original.append('turn/start', { turn: 1 })
+    original.append('turn/end', { turn: 1, reason: { kind: 'completed' } })
+    workspace.additionalPaths = [join(cwd, 'shared')]
+    const response = await remote.create({ sessionId: original.id, workspaceId: WORKSPACE })
+    if (!response.ok) throw response.error
+    expect(response.value.sessionId).not.toBe(original.id)
+    const fresh = ctx.sessions.get(response.value.sessionId)
+    if (fresh === undefined) throw new Error('Replacement Session was not published')
+    expect(ctx.sandboxPolicy.additionalRootsOf(fresh)).toEqual(workspace.additionalPaths)
+    expect(ctx.sandboxPolicy.additionalRootsOf(original)).toEqual([])
+  })
+})
 
 describe('session.create Agent preset identity', () => {
   it('records the requested preset on the Session header', async () => {

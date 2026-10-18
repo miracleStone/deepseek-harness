@@ -11,11 +11,12 @@
  * Both registrations declare a **directory-flow hole** (`single` kind): the
  * slot a composed picker package's client half fills with its
  * picking interaction — a renderless native-chooser driver or an in-app
- * browsing dialog. ui-workspace owns the trigger (the "Add workspace…"
- * entry, present only while the hole is occupied) and the adoption
- * semantics (`createWorkspace({ path })`, the retryable error dialog,
- * Choose again); the occupant owns everything between `open` and the picked path,
- * including creating a new directory to hand back. That occupant-owned
+ * browsing dialog. ui-workspace owns the Add workspace and Add folder
+ * triggers (present only while the hole is occupied) and registration
+ * semantics. Add workspace uses `createWorkspace({ path })` and a retryable
+ * error dialog with Choose again; Add folder links the path to its Workspace.
+ * The occupant owns everything between `open` and the picked path, including
+ * creating a new directory to hand back. That occupant-owned
  * creation is why adding a workspace has a single route: an unoccupied hole
  * leaves the surface with no add affordance at all.
  * Two holes exist because the two menu surfaces are independent slot entries
@@ -60,9 +61,9 @@ declare module '@deepseek-ai/dsh-client-ui-context-menu/client' {
   }
 }
 
-/** One request for the existing Workspace rename or delete dialog. */
+/** One captured request for a Workspace folder, rename, or delete dialog. */
 export type WorkspaceActionRequest = {
-  readonly action: 'rename' | 'delete'
+  readonly action: 'manage-folders' | 'rename' | 'delete'
   readonly workspaceId: WorkspaceId
   readonly displayTitle: string
   readonly storedTitle: string
@@ -76,7 +77,7 @@ export type WorkspaceActionRequest = {
 export interface DirectoryFlowOwnerProps {
   /** True while a picking interaction is requested; flipping back to false withdraws the request. */
   open: boolean
-  /** True while the owner adopts a picked path (`createWorkspace` in flight); occupants disable their commit affordances. */
+  /** True while the owner registers a picked path as a Workspace or additional folder; occupants disable their commit affordances. */
   busy: boolean
   /** The operator picked a directory (absolute host path); the owner adopts it. */
   onPicked: (path: string) => void
@@ -290,6 +291,12 @@ export type WorkspaceBrowserInjected = {
   renameWorkspace: (workspaceId: WorkspaceId, title: string) => Promise<void>
   /** Delete only a Host Workspace registration; directory and Session logs remain. */
   deleteWorkspace: (workspaceId: WorkspaceId) => Promise<void>
+  /** Register an additional folder for new conversations; rejects on failure. The UI reads committed changes from the model. */
+  addWorkspaceFolder: (workspaceId: WorkspaceId, path: string) => Promise<WorkspaceView>
+  /** Unlink an additional folder for new conversations, never delete files; rejects on failure. The UI retains its model data. */
+  removeWorkspaceFolder: (workspaceId: WorkspaceId, path: string) => Promise<WorkspaceView>
+  /** Report folder-picker and mutation outcomes through the frame-wide Workspace toast. */
+  notifyWorkspaceFolder: (notice: WorkspaceFolderNotice) => void
   /**
    * Reorder a Workspace in the durable registry display order.
    * Omitted anchor appends to the end.
@@ -316,8 +323,17 @@ export type SessionRowActionProps<Injected extends object = object> =
   & PropsLocale<'workspace'>
   & InjectFace<Injected>
 
+/** Folder-management outcomes reported outside the dialog so closing it preserves feedback. */
+export type WorkspaceFolderNotice =
+  | { kind: 'folderAdded' }
+  | { kind: 'folderRemoved' }
+  | { kind: 'folderAddFailed' }
+  | { kind: 'folderRemoveFailed' }
+  | { kind: 'folderPickerFailed' }
+
 /** One transient Workspace notice rendered by the overlay toast entry. */
 export type RowToast =
+  | WorkspaceFolderNotice
   | { kind: 'archived'; sessionId: SessionId }
   | { kind: 'stoppedAndArchived'; sessionId: SessionId }
   | { kind: 'sessionIdCopied' }

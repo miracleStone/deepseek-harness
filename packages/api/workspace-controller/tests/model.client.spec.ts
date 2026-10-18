@@ -3,6 +3,7 @@ import {
   ClientWorkspaceModel, type WorkspaceRemote,
 } from '../src/client/index.ts'
 import type {
+  WorkspaceAddFolderRequest,
   WorkspaceArchiveSessionRequest,
   WorkspaceArchiveValue,
   WorkspaceCreateRequest,
@@ -16,6 +17,7 @@ import type {
   WorkspacePinSessionRequest,
   WorkspacePinValue,
   WorkspaceRenameRequest,
+  WorkspaceRemoveFolderRequest,
   WorkspaceUnarchiveSessionRequest,
   WorkspaceUnpinSessionRequest,
   WorkspaceValue,
@@ -75,6 +77,10 @@ class FakeWorkspaceRemote implements WorkspaceRemote {
     Promise.resolve(remoteOk({ workspace: workspace(request.path.split('/').pop() ?? 'workspace'), created: true }))
   onRename: (request: WorkspaceRenameRequest) => Promise<RemoteResult<WorkspaceValue>> = request =>
     Promise.resolve(remoteOk({ workspace: { ...workspace(String(request.workspaceId)), title: request.title } }))
+  onAddFolder: (request: WorkspaceAddFolderRequest) => Promise<RemoteResult<WorkspaceValue>> = request =>
+    Promise.resolve(remoteOk({ workspace: { ...workspace(String(request.workspaceId)), additionalPaths: [request.path] } }))
+  onRemoveFolder: (request: WorkspaceRemoveFolderRequest) => Promise<RemoteResult<WorkspaceValue>> = request =>
+    Promise.resolve(remoteOk({ workspace: workspace(String(request.workspaceId)) }))
   onDelete: (_request: WorkspaceDeleteRequest) => Promise<RemoteResult<WorkspaceDeleteValue>> = () =>
     Promise.resolve(remoteOk({ deleted: true }))
   onInsertBefore: (
@@ -111,6 +117,16 @@ class FakeWorkspaceRemote implements WorkspaceRemote {
   rename(request: WorkspaceRenameRequest): Promise<RemoteResult<WorkspaceValue>> {
     this.record('rename', request)
     return this.onRename(request)
+  }
+
+  addFolder(request: WorkspaceAddFolderRequest): Promise<RemoteResult<WorkspaceValue>> {
+    this.record('addFolder', request)
+    return this.onAddFolder(request)
+  }
+
+  removeFolder(request: WorkspaceRemoveFolderRequest): Promise<RemoteResult<WorkspaceValue>> {
+    this.record('removeFolder', request)
+    return this.onRemoveFolder(request)
   }
 
   delete(request: WorkspaceDeleteRequest): Promise<RemoteResult<WorkspaceDeleteValue>> {
@@ -233,6 +249,43 @@ describe('ClientWorkspaceModel', () => {
     await expect(model.create({ path: '/w/created' })).resolves.toMatchObject({ ok: true })
     expect(remote.calls).toContainEqual({ method: 'create', request: { path: '/w/created' } })
     expect(model.getSnapshot().items[0]?.workspaceId).toBe('created')
+  })
+
+  it('merges folder mutation echoes and preserves the current row after refusal', async () => {
+    const remote = new FakeWorkspaceRemote()
+    const model = modelFor(remote)
+    baseline(model, [workspace('one')])
+    await expect(model.addFolder(wid('one'), '/extra')).resolves.toMatchObject({ ok: true })
+    expect(model.getSnapshot().items[0]?.additionalPaths).toEqual(['/extra'])
+    expect(remote.calls).toContainEqual({ method: 'addFolder', request: { workspaceId: 'one', path: '/extra' } })
+    const before = model.getSnapshot()
+    remote.onAddFolder = () => Promise.resolve(workspaceError(
+      new RemoteError('workspace/invalid-path', 'missing folder', { path: '/missing' }),
+    ))
+    await expect(model.addFolder(wid('one'), '/missing')).resolves.toMatchObject({ ok: false })
+    expect(model.getSnapshot()).toBe(before)
+    remote.onRemoveFolder = () => Promise.resolve(workspaceError(
+      new RemoteError('gateway/bad-request', 'primary folder', {}),
+    ))
+    await expect(model.removeFolder(wid('one'), '/w/one')).resolves.toMatchObject({ ok: false })
+    expect(model.getSnapshot()).toBe(before)
+    remote.onRemoveFolder = request => Promise.resolve(remoteOk({ workspace: workspace(String(request.workspaceId)) }))
+    await expect(model.removeFolder(wid('one'), '/extra')).resolves.toMatchObject({ ok: true })
+    expect(model.getSnapshot().items[0]).not.toHaveProperty('additionalPaths')
+    expect(remote.calls).toContainEqual({ method: 'removeFolder', request: { workspaceId: 'one', path: '/extra' } })
+  })
+
+  it('retains a newer streamed folder projection when an older unary response arrives', async () => {
+    const remote = new FakeWorkspaceRemote()
+    const model = modelFor(remote)
+    baseline(model, [workspace('one')])
+    const gate = deferred<RemoteResult<WorkspaceValue>>()
+    remote.onAddFolder = () => gate.promise
+    const adding = model.addFolder(wid('one'), '/first')
+    model.upsertView({ ...workspace('one', [], '2026-03-01T00:00:00.000Z'), additionalPaths: ['/second'] })
+    gate.resolve(remoteOk({ workspace: { ...workspace('one', [], '2026-02-01T00:00:00.000Z'), additionalPaths: ['/first'] } }))
+    await adding
+    expect(model.getSnapshot().items[0]?.additionalPaths).toEqual(['/second'])
   })
 
   it('lets newer stream order outrank unary echoes and rolls failures back', async () => {

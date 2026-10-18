@@ -59,6 +59,13 @@ await project.setTitle('Renamed')
 ctx.workspaceRegistry.list() // shows the project, newest first
 ```
 
+<a id="additional-folders"></a>
+### 额外文件夹
+
+Workspace 保留一个不可变的主目录 `path` 和一个有序的 `additionalPaths` 列表。`addFolder(path)` 接受完整绝对路径表示的现有目录，解析其规范 realpath，并忽略重复项，包括主目录的别名。`removeFolder(path)` 只移除额外目录，且可幂等调用；即使目录已消失，仍可通过存储的规范路径移除它。现有别名也可用于指定要移除的目录。主目录不可移除，因此 Workspace 始终至少保留一个根目录。
+
+文件夹校验与写入共用注册表的串行变更队列。路径无效或存储写入失败时，记录与变更通知均保持不变；调用方会收到表示无效路径的 `WorkspaceInvalidPathError`、表示移除主目录的 `WorkspacePrimaryFolderError`，或原始存储错误。两种操作都不会创建或删除文件系统条目。额外文件夹绝不改变主路径、目录状态、Session cwd 或 Session 成员关系。
+
 <a id="first-use-workspace"></a>
 ### 首次使用工作区
 
@@ -90,11 +97,11 @@ Workspace 注册不意味着拥有其目录。未来的破坏性文件系统操�
 
 ### 设计理念
 
-- **每个规范路径一条记录。** `fs.realpath` 是唯一的一套唯一性规范：路径以规范化形式存储，因此指向已有记录目录的符号链接会与之冲突，唯一性即规范路径的字符串相等。
+- **每个规范主路径一条记录。** `fs.realpath` 是唯一的一套唯一性规范：路径以规范化形式存储，因此指向已有记录主目录的符号链接会与之冲突。额外文件夹只在所属 Workspace 内去重，不占用注册表身份。
 - **成员资格以已记录的归属为起点。** 头部索引校验有序的 `sessionIds`；目录缺失的候选保留归属，其他无效候选在读取时过滤，并在下一次变更时剪除。历史引导使用的严格规范路径索引只包含现存目录。
 - **仅读取头部。** 引导与 attach 校验只读取 `SessionHeader` 字段；事件正文绝不加载。
 - **两次写入的变更带显式标记。** 创建与删除在记录/顺序对可能分叉之前先持久化 `pendingMutation` 标记，因此启动只补全被中断的操作，未标记的分叉作为损坏明确报错。
-- **串行化写入。** 注册表操作跑在同一条操作链上；实体变更通过领域写链上的 `table.update` 执行，写入 `updatedAt`，并在其所在的链位置决定成员资格。
+- **串行化写入。** 注册表与实体操作共用同一条操作链；异步文件夹校验在其中完成后，`table.update` 才在领域写链上提交，写入 `updatedAt`，并在其所在的链位置决定成员资格。
 
 <a id="api-behavior"></a>
 ### API 行为
@@ -116,6 +123,8 @@ Workspace 注册不意味着拥有其目录。未来的破坏性文件系统操�
 ### 持久形态
 
 注册表打开 `workspace` 领域（版本 2）：一张以 `WorkspaceId` 为键的 `workspaces` 表，加上一个持有 `workspaceIds`（权威显示顺序）、`archivedSessionIds`、`pinnedSessionIds`、可选的首次使用身份 `defaultWorkspaceId` 与可选 `pendingMutation` 标记的全局状态。归档与置顶集合存储会话 id 字符串，默认值为空，不包含逐项对象或时间戳；置顶数组把最近置顶的 id 放在前面。归档在同一次全局状态写入中清除置顶，但不改变 Workspace 成员关系。取消归档不做会话存在性探测，因为从集合中移除 id 不可能引入未知 id，而归档会在加入前校验会话。
+
+每条 Workspace 记录保存其不可变的主目录 `path`；可选的 `additionalPaths` 按添加顺序保存额外的规范目录。省略该字段表示空列表，现有记录加载时无需改写它。
 
 ### 生命周期
 

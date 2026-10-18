@@ -343,7 +343,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-api-workspace-controller`
 
 - `inject`: `remoteAccess` · `typert` · `workspaceRegistry`
-- `source`: [`packages/api/workspace-controller/src/index.ts:37`](../packages/api/workspace-controller/src/index.ts)
+- `source`: [`packages/api/workspace-controller/src/index.ts:39`](../packages/api/workspace-controller/src/index.ts)
 
 ```ts config-catalog
 /** First-use directory policy for the Host account. */
@@ -2962,7 +2962,7 @@ export interface Config {
 
 - `inject`: `sessionProjections`
 - `refs`: [`SandboxMode`](subsystems/sandbox.md)
-- `source`: [`packages/sandbox/sandbox-policy/src/index.ts:94`](../packages/sandbox/sandbox-policy/src/index.ts)
+- `source`: [`packages/sandbox/sandbox-policy/src/index.ts:119`](../packages/sandbox/sandbox-policy/src/index.ts)
 
 ```ts config-catalog
 /**
@@ -4416,6 +4416,13 @@ export interface Config extends PresetSelectionConfig {
    * enable model selection. Discovery is removed when this instance unloads.
    */
   modelDiscovery?: boolean
+  /**
+   * Allow per-call reasoning_effort without changing the child provider/model
+   * (default true). Exposed only by providers supporting child Agent options.
+   * Model selection independently permits effort selection. Explicit effort
+   * choices enforce the same Session route policy as provider/model choices.
+   */
+  enableReasoningEffort?: boolean
   /**
    * Agent options applied to every child; omitted fields use child-loop defaults.
    */

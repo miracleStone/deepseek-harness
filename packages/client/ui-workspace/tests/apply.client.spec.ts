@@ -82,6 +82,8 @@ async function bench(access: 'fake' | 'static' = 'fake') {
     title: 'new', sessionIds: [], createdAt: '0', updatedAt: '0',
   }))
   const rename = vi.fn(async () => ({}))
+  const addFolder = vi.fn(async () => workspace('ws-new', []))
+  const removeFolder = vi.fn(async () => workspace('ws-new', []))
   const selectPanel = vi.fn()
   ctx.provide('layout', { selectPanel, beginNavigation: () => new AbortController().signal })
   const search = vi.fn(async () => ({
@@ -135,6 +137,8 @@ async function bench(access: 'fake' | 'static' = 'fake') {
     create,
     initializeDefault,
     rename,
+    addFolder,
+    removeFolder,
     delete: vi.fn(async () => undefined),
     insertBefore: vi.fn(async () => undefined),
     archiveSession: vi.fn(async () => undefined),
@@ -168,7 +172,8 @@ async function bench(access: 'fake' | 'static' = 'fake') {
   locale.setLocale('zh')
   ctx.provide('locale', locale)
   return {
-    ctx, slots: ctx.get('slots') as SlotRegistry, locale, create, rename, commands, accessSource, whenResourceAccess, stopGuard,
+    ctx, slots: ctx.get('slots') as SlotRegistry, locale, create, rename, addFolder, removeFolder, commands, accessSource,
+    whenResourceAccess, stopGuard,
     retain, using, selectPanel, search, renameSession, binding, fork, pickDirectory, pinSession, unpinSession,
     workspacesSubscribe, initializeDefault, history, scope, sessionOf,
     setWorkspaces: (snapshot: WorkspaceSnapshot): void => { workspaceSnapshot = snapshot },
@@ -343,6 +348,7 @@ describe('ui-workspace apply', () => {
     const rowToastEntry = entry(b.slots, 'shell.overlay', 'workspace.row-toast')
     expect(rowToastEntry.store).toBeUndefined()
     expect(b.slots.entries('workspace.toast').map(row => row.options.key)).toEqual([
+      'folderAdded', 'folderRemoved', 'folderAddFailed', 'folderRemoveFailed', 'folderPickerFailed',
       'sessionIdCopied', 'sessionIdCopyFailed', 'pinFailed', 'unpinFailed', 'archivedNotOpenable',
       'defaultWorkspaceFailed', 'shortcutForkFailed', 'createFailed', 'forkRequiresOpen', 'archived', 'stoppedAndArchived',
     ])
@@ -835,6 +841,36 @@ describe('ui-workspace apply', () => {
     expect(b.selectPanel).not.toHaveBeenCalled()
   })
 
+  it('keeps folder feedback in the frame-wide toast host across sidebar declaration lifetimes', async () => {
+    const b = await bench()
+    onTestFinished(() => b.ctx.fiber.dispose())
+    declare(b.slots, 'shell.overlay')
+    const sidebar = () => b.slots.register({
+      name: 'shell.overlay', id: 'test-sidebar-owner',
+      children: { 'sidebar.workspaces': { kind: 'single', scope: 'root' } },
+    }, SidebarDeclarationOwner)
+    const removeSidebar = sidebar()
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const browser = faceOf(b.slots.entries('sidebar.workspaces')[0]!) as WorkspaceBrowserInjected
+    const toast = faceOf(entry(b.slots, 'shell.overlay', 'workspace.row-toast')) as RowToastInjected
+    const notices = ['folderAdded', 'folderRemoved', 'folderAddFailed', 'folderRemoveFailed', 'folderPickerFailed'] as const
+    for (const [index, kind] of notices.entries()) {
+      browser.notifyWorkspaceFolder({ kind })
+      expect(toast.hooks.toast.getSnapshot()).toEqual({ kind, seq: index + 1 })
+    }
+    removeSidebar()
+    expect(b.slots.spec('sidebar.workspaces.directoryFlow')).toBeUndefined()
+    expect(b.slots.entries(MENU_ITEM)).toHaveLength(0)
+    browser.notifyWorkspaceFolder({ kind: 'folderAdded' })
+    expect(toast.hooks.toast.getSnapshot()).toEqual({ kind: 'folderAdded', seq: 6 })
+    sidebar()
+    expect(b.slots.entries('sidebar.workspaces')).toHaveLength(1)
+    expect(b.slots.spec('sidebar.workspaces.directoryFlow')).toMatchObject({ kind: 'single' })
+    expect(b.slots.entries(MENU_ITEM)).toHaveLength(5)
+    expect(b.slots.entries('workspace.toast').filter(row => row.options.key === 'folderAdded')).toHaveLength(1)
+    expect(toast.hooks.toast.getSnapshot()).toEqual({ kind: 'folderAdded', seq: 6 })
+  })
+
   it('routes browser actions and picker creation to the services', async () => {
     const b = await bench()
     declare(b.slots, 'sidebar.workspaces', 'conversation.hero.workspace')
@@ -860,6 +896,14 @@ describe('ui-workspace apply', () => {
     expect(browser.searchResultLimit).toBe(20)
     await browser.renameWorkspace('ws' as never, 'renamed')
     expect(b.rename).toHaveBeenCalledWith('ws', 'renamed')
+    await expect(browser.addWorkspaceFolder('ws' as WorkspaceId, 'F:\\projects\\shared')).resolves.toEqual(workspace('ws-new', []))
+    expect(b.addFolder).toHaveBeenCalledWith('ws', 'F:\\projects\\shared')
+    await expect(browser.removeWorkspaceFolder('ws' as WorkspaceId, 'F:\\projects\\shared')).resolves.toEqual(workspace('ws-new', []))
+    expect(b.removeFolder).toHaveBeenCalledWith('ws', 'F:\\projects\\shared')
+    b.addFolder.mockRejectedValueOnce(new Error('unavailable'))
+    await expect(browser.addWorkspaceFolder('ws' as WorkspaceId, '/missing')).rejects.toThrow('unavailable')
+    b.removeFolder.mockRejectedValueOnce(new Error('read-only registry'))
+    await expect(browser.removeWorkspaceFolder('ws' as WorkspaceId, '/shared')).rejects.toThrow('read-only registry')
     await browser.createWorkspace({ path: '/tmp/browser-project' })
     expect(b.create).toHaveBeenCalledWith({ path: '/tmp/browser-project' })
 
@@ -939,7 +983,10 @@ it('captures Workspace menu requests, rechecks mutable access, and withdraws reg
   const target = { kind: 'workspace' as const, value: { workspaceId: 'alpha' as WorkspaceId, path: '/projects/alpha', displayTitle: 'Alpha' } }
   const menu = b.ctx.contextMenus.resolve(target)
   await menu.ready
-  expect(menu.source.getSnapshot().map(item => item.id)).toEqual(['workspace.rename/rename', 'workspace.delete/delete'])
+  expect(menu.source.getSnapshot().map(item => item.id)).toEqual([
+    'workspace.folders/manage-folders', 'workspace.rename/rename', 'workspace.delete/delete',
+  ])
+  expect(menu.source.getSnapshot().find(item => item.id === 'workspace.delete/delete')).toMatchObject({ danger: true })
   menu.select('workspace.rename/rename')
   expect(browser.hooks.workspaceActionRequest.getSnapshot()).toEqual({ action: 'rename', workspaceId: 'alpha', displayTitle: 'Alpha', storedTitle: 'alpha' })
   browser.settleWorkspaceAction()
@@ -954,12 +1001,68 @@ it('captures Workspace menu requests, rechecks mutable access, and withdraws reg
   b.accessSource.mockReturnValueOnce(createSnapshotStore(false))
   denied.select('workspace.delete/delete')
   expect(browser.hooks.workspaceActionRequest.getSnapshot()).toBeNull()
+  const folders = b.ctx.contextMenus.resolve(target)
+  await folders.ready
+  folders.select('workspace.folders/manage-folders')
+  expect(browser.hooks.workspaceActionRequest.getSnapshot()?.action).toBe('manage-folders')
+  expect(browser.hooks.workspaceShortcuts.getSnapshot().directoryBusy).toBe(true)
   const deletion = b.ctx.contextMenus.resolve(target)
   await deletion.ready
   deletion.select('workspace.delete/delete')
   expect(browser.hooks.workspaceActionRequest.getSnapshot()?.action).toBe('delete')
+  expect(browser.hooks.workspaceShortcuts.getSnapshot().directoryBusy).toBe(false)
   const pending = b.ctx.contextMenus.resolve(target)
   await pending.ready
   await fiber.dispose()
   expect(pending.source.getSnapshot()).toEqual([])
 })
+
+it.each(['workspace/addFolder', 'workspace/removeFolder'] as const)(
+  'offers folder management when only %s is allowed and rechecks access before opening', async (endpoint) => {
+    const b = await bench()
+    const allowed = new Set<string>([endpoint])
+    b.accessSource.mockImplementation((_kind, _id, action) => createSnapshotStore(allowed.has(action)))
+    b.setWorkspaces(workspaceState([workspace('alpha', [])]))
+    declare(b.slots, 'sidebar.workspaces')
+    const fiber = b.ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    const browser = faceOf(b.slots.entries('sidebar.workspaces')[0]!) as WorkspaceBrowserInjected
+    const target = { kind: 'workspace' as const, value: {
+      workspaceId: 'alpha' as WorkspaceId, path: '/projects/alpha', displayTitle: 'Alpha',
+    } }
+    const menu = b.ctx.contextMenus.resolve(target)
+    await menu.ready
+    expect(menu.source.getSnapshot()).toEqual([expect.objectContaining({
+      id: 'workspace.folders/manage-folders', label: '管理文件夹', icon: { key: 'workspace.folders' },
+    })])
+    browser.requestAddWorkspace()
+    expect(browser.hooks.workspaceShortcuts.getSnapshot().addRequested).toBe(true)
+    menu.select('workspace.folders/manage-folders')
+    expect(browser.hooks.workspaceActionRequest.getSnapshot()).toEqual({
+      action: 'manage-folders', workspaceId: 'alpha', displayTitle: 'Alpha', storedTitle: 'alpha',
+    })
+    expect(browser.hooks.workspaceShortcuts.getSnapshot().addRequested).toBe(false)
+    expect(browser.hooks.workspaceShortcuts.getSnapshot().directoryBusy).toBe(true)
+    browser.settleWorkspaceAction()
+    expect(browser.hooks.workspaceShortcuts.getSnapshot().directoryBusy).toBe(false)
+    expect(browser.hooks.workspaceActionRequest.getSnapshot()).toBeNull()
+
+    const stale = b.ctx.contextMenus.resolve(target)
+    await stale.ready
+    allowed.clear()
+    stale.select('workspace.folders/manage-folders')
+    expect(browser.hooks.workspaceActionRequest.getSnapshot()).toBeNull()
+    const denied = b.ctx.contextMenus.resolve(target)
+    await denied.ready
+    expect(denied.source.getSnapshot()).toEqual([])
+    allowed.add(endpoint)
+    const removed = b.ctx.contextMenus.resolve(target)
+    await removed.ready
+    b.setWorkspaces(workspaceState([]))
+    removed.select('workspace.folders/manage-folders')
+    expect(browser.hooks.workspaceActionRequest.getSnapshot()).toBeNull()
+    expect(browser.hooks.workspaceShortcuts.getSnapshot().directoryBusy).toBe(false)
+    await fiber.dispose()
+    expect(menu.source.getSnapshot()).toEqual([])
+  },
+)

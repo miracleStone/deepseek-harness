@@ -18,6 +18,7 @@ import {
   assertAllowedModelRoutes,
   assertAllowedModelSelection,
   preflightChildLlmRoute,
+  requestedAgentOptions,
 } from '../src/model-selection.ts'
 import { callSubagent, modelSelectionSetupAgent, setup, text } from './harness.ts'
 
@@ -68,6 +69,41 @@ describe('dsh-tool-subagent model selection', () => {
       assertAllowedModelSelection(undefined, parent, { provider: 'alpha', model: 'other-model' })
     }).toThrow('explicit selection is limited to the parent route')
   })
+
+  it('preserves configured options by identity when the call selects nothing', () => {
+    const configured = { provider: 'deployment-provider', model: 'deployment-model', maxTokens: 321 }
+    const policy = { routes: [{ provider: 'alpha', model: 'allowed-model' }] }
+    expect(requestedAgentOptions(configured, {}, false, policy, {}, false)).toBe(configured)
+    expect(requestedAgentOptions(undefined, {}, false, policy, {}, false)).toBeUndefined()
+  })
+
+  it.each(['configured', 'provider', 'partial-configured'] as const)(
+    'accepts effort-only selection on an authorized %s route', async (source) => {
+      const defaults = { provider: 'alpha', model: 'configured-model' }
+      const requests: SubagentStartRequest[] = []
+      const ctx = await setup({
+        provider: 'mock', withModelSelection: true,
+        parentAgentOptions: { provider: 'alpha', model: 'parent-model' },
+        ...source === 'configured' ? { agentOptions: { ...defaults, maxTokens: 321 } }
+          : source === 'partial-configured' ? { agentOptions: { model: defaults.model, maxTokens: 321 } } : {},
+      }, {
+        onStart: (request) => { requests.push(request) },
+        ...source === 'provider' ? { agentRouteDefaults: defaults } : {},
+      })
+      ctx.llm.registerAdapter(['alpha'], new MockAdapter([], REASONING))
+      const lookup = vi.spyOn(ctx.llm, 'resolveCallConfig')
+      const result = await callSubagent(ctx, {
+        description: 'configured effort', prompt: 'work', reasoning_effort: 'low',
+      })
+      expect(result.isError, text(result)).toBe(false)
+      expect(lookup).toHaveBeenCalledWith({ ...defaults, reasoningEffort: 'low' }, expect.any(AbortSignal))
+      expect(requests[0]?.agentOptions).toEqual({
+        ...source === 'partial-configured' ? { model: defaults.model } : defaults,
+        ...source === 'provider' ? {} : { maxTokens: 321 },
+        reasoningEffort: 'low',
+      })
+    },
+  )
 
   it('leaves deployment or parent defaults outside the allowlist usable when the call selects nothing', async () => {
     let starts = 0
@@ -122,20 +158,20 @@ describe('dsh-tool-subagent model selection', () => {
   })
 
   it('hides and rejects route fields without modelSelection', async () => {
-    const ctx = await setup({ provider: 'mock', parentAgentOptions: { provider: 'alpha', model: 'parent-model' } })
+    const ctx = await setup({ provider: 'mock', enableReasoningEffort: false, parentAgentOptions: { provider: 'alpha', model: 'parent-model' } })
     const schema = ctx.tools.schemas().find(entry => entry.name === 'subagent')!
     const props = (schema.parameters as { properties?: Record<string, unknown> }).properties ?? {}
     expect(Object.keys(props).sort()).toEqual(['cwd', 'description', 'name', 'prompt'])
     expect(schema.description).not.toContain('list_subagent_models')
     expect(ctx.tools.get('list_subagent_models')).toBeUndefined()
 
-    for (const selection of [
-      { provider: 'alpha', model: 'parent-model' },
-      { reasoning_effort: 'low' },
-    ]) {
+    for (const [selection, expected] of [
+      [{ provider: 'alpha', model: 'parent-model' }, 'child model selection is disabled for this tool instance'],
+      [{ reasoning_effort: 'low' }, 'child reasoning effort selection is disabled for this tool instance'],
+    ] as const) {
       const result = await callSubagent(ctx, { description: 'forced route', prompt: 'do it', ...selection })
       expect(result.isError).toBe(true)
-      expect(text(result)).toContain('child model selection is disabled for this tool instance')
+      expect(text(result)).toContain(expected)
     }
   })
 
@@ -157,7 +193,7 @@ describe('dsh-tool-subagent model selection', () => {
     expect(descriptions()).not.toContain(guidance)
   })
 
-  it.each(['configured', 'provider'] as const)('rejects effort-only selection despite %s route defaults', async (source) => {
+  it.each(['configured', 'provider'] as const)('rejects effort-only selection on an unauthorized %s route', async (source) => {
     const defaults = { provider: 'alpha', model: 'configured-model' }
     const start = vi.fn()
     const ctx = await setup({
@@ -172,7 +208,7 @@ describe('dsh-tool-subagent model selection', () => {
       description: 'adjust effort', prompt: 'work', reasoning_effort: 'low',
     })
     expect(result.isError).toBe(true)
-    expect(text(result)).toContain('`reasoning_effort` requires both `provider` and `model`')
+    expect(text(result)).toContain('without a recorded model-selection policy, explicit selection is limited to the parent route')
     expect(start).not.toHaveBeenCalled()
   })
 
@@ -292,10 +328,9 @@ describe('dsh-tool-subagent model selection', () => {
   })
 
   it.each([
-    {},
     { provider: 'alpha' },
     { model: 'parent-model' },
-  ])('rejects reasoning effort without a complete explicit route: %j', async (route) => {
+  ])('rejects reasoning effort with a partial explicit route: %j', async (route) => {
     const start = vi.fn()
     const ctx = await setup({
       provider: 'mock', withModelSelection: true, parentAgentOptions: parentWithRoute().options,
@@ -402,7 +437,7 @@ describe('dsh-tool-subagent model selection', () => {
       reasoning_effort: 'low',
     })
     expect(result.isError).toBe(true)
-    expect(text(result)).toContain('`reasoning_effort` requires both `provider` and `model`')
+    expect(text(result)).toContain('without an effective provider and model')
   })
 
   it('rejects preflight without an effective provider and model', async () => {
@@ -577,7 +612,7 @@ describe('dsh-tool-subagent model selection', () => {
 
   it('keeps fork model selection unavailable without instance opt-in even with Session authorization', async () => {
     const started = vi.fn()
-    const ctx = await setup({ provider: 'mock' }, {
+    const ctx = await setup({ provider: 'mock', enableReasoningEffort: false }, {
       inheritsParentContext: true,
       onStart: started,
     })
@@ -592,13 +627,13 @@ describe('dsh-tool-subagent model selection', () => {
     expect(schema.description).not.toContain('list_subagent_models')
     expect(ctx.tools.get('list_subagent_models', agent)).toBeUndefined()
 
-    for (const selection of [
-      { provider: 'alpha', model: 'fast-model' },
-      { reasoning_effort: 'high' },
-    ]) {
+    for (const [selection, expected] of [
+      [{ provider: 'alpha', model: 'fast-model' }, 'model selection is disabled for this tool instance'],
+      [{ reasoning_effort: 'high' }, 'reasoning effort selection is disabled for this tool instance'],
+    ] as const) {
       const result = await callSubagent(ctx, { description: 'fork work', prompt: 'do it', ...selection })
       expect(result.isError).toBe(true)
-      expect(text(result)).toContain('model selection is disabled for this tool instance')
+      expect(text(result)).toContain(expected)
     }
     expect(started).not.toHaveBeenCalled()
 

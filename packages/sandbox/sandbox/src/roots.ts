@@ -1,7 +1,7 @@
 /**
  * The writable-root derivation shared by every enforcement dialect that
  * expresses a mode as a canonical allow-list: `workspace-write` means "the
- * workspace root, explicit extra directories, and platform temp areas", and this module is that
+ * workspace roots, explicit extra directories, and platform temp areas", and this module is that
  * meaning's one home. The Seatbelt profile
  * (`@deepseek-ai/dsh-sandbox-local`) and the in-process filesystem fence
  * (`@deepseek-ai/dsh-fs-sandbox`) both derive their allow-list here, so "the
@@ -68,10 +68,10 @@ export function canonicalPath(path: string): string {
 }
 
 /**
- * The workspace-owned writable roots — the policy's workspace root plus its
- * explicit extra directories, as a canonical, deduplicated allow-list. Both
- * the workspace and every extra root must be granted together by every
- * backend; this is the one derivation of that set, kept separate from the
+ * The workspace-owned writable roots — the policy's workspace directories plus
+ * its explicit extra directories, as a canonical, deduplicated allow-list.
+ * Workspace aliases are canonicalized; explicit extra grants reject symlinks.
+ * Backends must grant this complete set or reject unsupported grants, separate from the
  * platform temp policy each backend documents for itself (Seatbelt and the fs
  * fence use {@link writableRoots}; bwrap and Landlock add their own temp
  * grants).
@@ -81,7 +81,10 @@ export function canonicalPath(path: string): string {
  */
 export function workspaceWritableRoots(policy: SandboxExecutionPolicy): string[] {
   if (policy.mode !== 'workspace-write') return []
-  return [...new Set([canonicalPath(policy.workspaceRoot), ...(policy.additionalWritableRoots ?? []).map(additionalRoot)])]
+  return [...new Set([
+    ...[policy.workspaceRoot, ...policy.additionalWorkspaceRoots ?? []].map(canonicalPath),
+    ...(policy.additionalWritableRoots ?? []).map(additionalRoot),
+  ])]
 }
 
 /**

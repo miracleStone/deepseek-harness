@@ -16,8 +16,10 @@ import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-
 import WorkspaceRegistry, {
   WorkspaceId,
   type workspaceDomainState,
+  WorkspaceInvalidPathError,
   WorkspaceMoveInvalidError,
   WorkspaceOrderInvalidError,
+  WorkspacePrimaryFolderError,
 } from '../src/index.ts'
 import type { WorkspaceDomainState, WorkspaceRecord } from '../src/index.ts'
 import { defaultWorkspaceTitle, fullyQualifiedWorkspacePath } from '../src/paths.ts'
@@ -213,7 +215,7 @@ describe('WorkspaceRegistry lifecycle and bootstrap', () => {
     const newer = await makeDir('newer')
     const alias = join(base, 'older-link')
     const plain = join(base, 'plain.txt')
-    await symlink(older, alias)
+    await symlink(older, alias, 'junction')
     await writeFile(plain, 'not a directory')
     const missing = join(base, 'missing')
     const result = await harness({
@@ -384,7 +386,7 @@ describe('WorkspaceRegistry create and lookup', () => {
     const firstDir = await makeDir('first')
     const secondDir = await makeDir('second')
     const alias = join(base, 'first-link')
-    await symlink(firstDir, alias)
+    await symlink(firstDir, alias, 'junction')
     const { registry, pool } = await harness()
     const first = await registry.create(firstDir, 'Original')
     const second = await registry.create(secondDir)
@@ -1026,6 +1028,217 @@ describe('header-validated membership projection', () => {
   })
 })
 
+describe('Workspace additional folders', () => {
+  it('canonicalizes extra directories and deduplicates aliases and the immutable primary', async () => {
+    const primary = await makeDir('folders-primary')
+    const extra = await makeDir('folders-extra')
+    const alias = join(base, 'folders-alias')
+    const primaryAlias = join(base, 'folders-primary-alias')
+    await symlink(extra, alias, 'junction')
+    await symlink(primary, primaryAlias, 'junction')
+    const result = await harness()
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const workspace = await result.registry.create(primary)
+    await workspace.addFolder(alias)
+    const written = result.changes.length
+    await workspace.addFolder(join(extra, '..', basename(extra)))
+    await workspace.addFolder(extra + '/')
+    await workspace.addFolder(primaryAlias)
+    expect(workspace.path).toBe(primary)
+    expect(workspace.additionalPaths).toEqual([extra])
+    expect(storedRecord(result.pool, workspace.id).additionalPaths).toEqual([extra])
+    expect(result.changes).toHaveLength(written)
+    expect(await result.registry.resolveByPath(extra)).toBeUndefined()
+    await workspace.removeFolder(alias)
+    expect(workspace.additionalPaths).toEqual([])
+  })
+
+  it('loads omitted and populated folder fields without resetting or changing the domain version', async () => {
+    const primary = await makeDir('folders-legacy')
+    const extra = await makeDir('folders-reloaded')
+    const id = WorkspaceId('folders-legacy-id')
+    const pool = storedPool([[id, record(primary, [])]], { initialized: true, workspaceIds: [id] })
+    const oldRecord = storedRecord(pool, id)
+    const first = await harness({ pool })
+    onTestFinished(() => first.ctx.fiber.dispose())
+    const workspace = first.registry.get(id)!
+    expect(workspace.additionalPaths).toEqual([])
+    expect(first.initChanges).toEqual([])
+    expect(storedRecord(pool, id)).toEqual(oldRecord)
+    await workspace.addFolder(extra)
+    await first.ctx.fiber.dispose()
+    await rm(extra, { recursive: true })
+
+    const restarted = await harness({ pool })
+    onTestFinished(() => restarted.ctx.fiber.dispose())
+    expect(restarted.registry.get(id)!.additionalPaths).toEqual([extra])
+    expect(restarted.registry.get(id)!.path).toBe(primary)
+    expect(pool.versions.get('workspace')).toBe(DOMAIN_VERSION)
+    expect(restarted.initChanges).toEqual([])
+  })
+
+  it('removes missing stored folders idempotently and refuses primary removal even when missing', async () => {
+    const primary = await makeDir('folders-removal-primary')
+    const extra = await makeDir('folders-removal-extra')
+    const result = await harness()
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const workspace = await result.registry.create(primary)
+    await workspace.addFolder(extra)
+    await rm(extra, { recursive: true })
+    await workspace.removeFolder(extra + '/')
+    const written = result.changes.length
+    await workspace.removeFolder(extra)
+    await workspace.removeFolder(join(base, 'never-added'))
+    await rm(primary, { recursive: true })
+    await expect(workspace.removeFolder(primary)).rejects.toBeInstanceOf(WorkspacePrimaryFolderError)
+    expect(workspace.additionalPaths).toEqual([])
+    expect(workspace.path).toBe(primary)
+    expect(result.changes).toHaveLength(written)
+  })
+
+  it('rejects invalid paths without pruning candidates or changing durable state', async () => {
+    const primary = await makeDir('folders-invalid-primary')
+    const file = join(base, 'folders-file')
+    await writeFile(file, 'not a directory')
+    const id = WorkspaceId('folders-invalid-id')
+    const pool = storedPool([[id, record(primary, ['filtered'])]], { initialized: true, workspaceIds: [id] })
+    const result = await harness({ pool })
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const workspace = result.registry.get(id)!
+    const original = storedRecord(pool, id)
+    for (const path of ['.', '', join(base, 'missing-folder'), file]) {
+      await expect(workspace.addFolder(path)).rejects.toBeInstanceOf(WorkspaceInvalidPathError)
+    }
+    await expect(workspace.removeFolder('.')).rejects.toBeInstanceOf(WorkspaceInvalidPathError)
+    const alias = join(base, 'folders-invalid-primary-alias')
+    await symlink(primary, alias, 'junction')
+    await expect(workspace.removeFolder(alias)).rejects.toBeInstanceOf(WorkspacePrimaryFolderError)
+    expect(storedRecord(pool, id)).toEqual(original)
+    expect(workspace.updatedAt).toBe(original.updatedAt)
+    expect(result.changes).toEqual([])
+  })
+
+  it('reports inspection failures without changing folders and tolerates missing removal aliases', async () => {
+    const primary = await makeDir('folders-inspection-primary')
+    const loop = join(base, 'folders-inspection-loop')
+    const file = join(base, 'folders-inspection-file')
+    await symlink(loop, loop, 'junction')
+    await writeFile(file, 'not a directory')
+    const result = await harness()
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const workspace = await result.registry.create(primary)
+    const original = storedRecord(result.pool, workspace.id)
+    const written = result.changes.length
+    const addition = workspace.addFolder(loop)
+    await expect(addition).rejects.toMatchObject({ name: 'WorkspaceInvalidPathError', path: loop })
+    await expect(addition).rejects.toHaveProperty('cause')
+    const removal = workspace.removeFolder(loop)
+    await expect(removal).rejects.toMatchObject({ name: 'WorkspaceInvalidPathError', path: loop })
+    await expect(removal).rejects.toHaveProperty('cause')
+    await workspace.removeFolder(join(file, 'child'))
+    expect(storedRecord(result.pool, workspace.id)).toEqual(original)
+    expect(result.changes).toHaveLength(written)
+  })
+
+  it('keeps memory, storage and notifications unchanged when folder writes fail', async () => {
+    const primary = await makeDir('folders-write-primary')
+    const extra = await makeDir('folders-write-extra')
+    const result = await harness()
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const workspace = await result.registry.create(primary)
+    const original = storedRecord(result.pool, workspace.id)
+    const written = result.changes.length
+    result.pool.failNextWrites = 1
+    await expect(workspace.addFolder(extra)).rejects.toThrow('injected write failure')
+    expect(workspace.additionalPaths).toEqual([])
+    expect(storedRecord(result.pool, workspace.id)).toEqual(original)
+    expect(result.changes).toHaveLength(written)
+    await workspace.addFolder(extra)
+    const added = storedRecord(result.pool, workspace.id)
+    result.pool.failNextWrites = 1
+    await expect(workspace.removeFolder(extra)).rejects.toThrow('injected write failure')
+    expect(workspace.additionalPaths).toEqual([extra])
+    expect(storedRecord(result.pool, workspace.id)).toEqual(added)
+    expect(result.changes).toHaveLength(written + 1)
+  })
+
+  it('validates and decides overlapping add/remove/title mutations at serialized slots', async () => {
+    const primary = await makeDir('folders-concurrent-primary')
+    const extra = await makeDir('folders-concurrent-extra')
+    const result = await harness()
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const workspace = await result.registry.create(primary)
+    let entered!: () => void
+    let release!: () => void
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const normalize = workspacePaths.existingWorkspaceFolder
+    const validate = vi.spyOn(workspacePaths, 'existingWorkspaceFolder').mockImplementation(async (path) => {
+      entered()
+      await gate
+      return normalize(path)
+    })
+    onTestFinished(() => { validate.mockRestore() })
+    const first = workspace.addFolder(extra)
+    await started
+    const removed = workspace.removeFolder(extra)
+    const added = workspace.addFolder(extra)
+    const renamed = workspace.setTitle('Concurrent title')
+    expect(validate).toHaveBeenCalledOnce()
+    expect(workspace.additionalPaths).toEqual([])
+    release()
+    await Promise.all([first, removed, added, renamed])
+    expect(workspace.additionalPaths).toEqual([extra])
+    expect(workspace.title).toBe('Concurrent title')
+    expect(storedRecord(result.pool, workspace.id)).toMatchObject({ additionalPaths: [extra], title: 'Concurrent title' })
+  })
+
+  it('finishes an admitted folder mutation before queued registration deletion', async () => {
+    const primary = await makeDir('folders-delete-primary')
+    const extra = await makeDir('folders-delete-extra')
+    const result = await harness()
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const workspace = await result.registry.create(primary)
+    let entered!: () => void
+    let release!: () => void
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const normalize = workspacePaths.existingWorkspaceFolder
+    const validate = vi.spyOn(workspacePaths, 'existingWorkspaceFolder').mockImplementationOnce(async (path) => {
+      entered()
+      await gate
+      return normalize(path)
+    })
+    onTestFinished(() => { validate.mockRestore() })
+    const adding = workspace.addFolder(extra)
+    await started
+    const deleting = result.registry.delete(workspace.id)
+    expect(result.registry.get(workspace.id)).toBe(workspace)
+    release()
+    await adding
+    await expect(deleting).resolves.toBe(true)
+    expect(result.registry.get(workspace.id)).toBeUndefined()
+    expect(result.pool.media.get('workspace')!.tables.get('workspaces')!.has(workspace.id)).toBe(false)
+    expect(result.changes.filter(change => change.table === 'workspaces').slice(-2).map(change => change.operation))
+      .toEqual(['put', 'deleted'])
+  })
+
+  it('keeps Session cwd membership tied only to the primary directory', async () => {
+    const primary = await makeDir('folders-membership-primary')
+    const extra = await makeDir('folders-membership-extra')
+    const result = await harness()
+    onTestFinished(() => result.ctx.fiber.dispose())
+    result.setSessions([header('primary-session', primary), header('extra-session', extra)])
+    const workspace = await result.registry.create(primary)
+    await workspace.attachSession(SessionId('primary-session'))
+    await workspace.addFolder(extra)
+    await expect(workspace.attachSession(SessionId('extra-session'))).rejects.toThrow(/resolves to/)
+    expect(workspace.sessionIds).toEqual(['primary-session'])
+    await workspace.removeFolder(extra)
+    expect(workspace.sessionIds).toEqual(['primary-session'])
+  })
+})
+
 describe('workspace mutation and status', () => {
   it('keeps createdAt stable, advances updatedAt, and preserves snapshot on write failure', async () => {
     const dir = await makeDir('timestamps')
@@ -1495,7 +1708,7 @@ describe('first-use Workspace preparation', () => {
     const target = join(h.directoryRoot, 'elsewhere')
     await mkdir(target)
     await mkdir(join(h.directoryRoot, 'nested'))
-    await symlink(target, join(h.directoryRoot, 'nested', 'Workspace'))
+    await symlink(target, join(h.directoryRoot, 'nested', 'Workspace'), 'junction')
     const workspace = await h.registry.initializeDefault(h.resolveDirectory)
     expect(workspace?.path).toBe(await realpath(target))
     // Not 'elsewhere': the title names the directory the caller asked for, so

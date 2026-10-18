@@ -1,0 +1,16 @@
+{
+  "formatVersion": 2,
+  "roots": [
+    {"key":"event:sandbox/workspace-roots","kind":"event","event":"sandbox/workspace-roots","surface":false,"digest":"2ed1e856ba397443003fb95c647d12074f9f0255a2892779f87877dba860440e"}
+  ],
+  "types": [],
+  "nodes": {
+    "0657d3ca5ac4e7bf": {"kind":"primitive","type":"number"},
+    "2ed1e856ba397443": {"kind":"object","properties":[{"name":"data","type":"9014568098cf28e1","optional":false},{"name":"ignorable","type":"dacf3d5f3e4ff619","optional":true},{"name":"seq","type":"0657d3ca5ac4e7bf","optional":false},{"name":"time","type":"0657d3ca5ac4e7bf","optional":false},{"name":"type","type":"3aabcf805ddc20f1","optional":false}],"indices":[]},
+    "3aabcf805ddc20f1": {"kind":"literal","value":"sandbox/workspace-roots"},
+    "4cd48f3e5108bd6e": {"kind":"primitive","type":"string"},
+    "9014568098cf28e1": {"kind":"object","properties":[{"name":"additionalWorkspaceRoots","type":"93c33d9687613293","optional":false}],"indices":[]},
+    "93c33d9687613293": {"kind":"array","element":"4cd48f3e5108bd6e"},
+    "dacf3d5f3e4ff619": {"kind":"literal","value":true}
+  }
+}

@@ -135,14 +135,14 @@ describe('workspace-write containment', () => {
 
   it('a symlinked directory inside the workspace pointing OUT is denied (canonicalized before containment)', async () => {
     // workspace/link -> outside ; writing workspace/link/f.txt would land in outside/f.txt.
-    await symlink(outside, join(workspace, 'link'))
+    await symlink(outside, join(workspace, 'link'), 'junction')
     const path = join(workspace, 'link', 'f.txt')
     await expect(fs.writeText(await target(path), 'x')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
     expect(existsSync(join(outside, 'f.txt'))).toBe(false)
   })
 
   it('a NEW file created under a symlinked-out directory is denied (deepest-ancestor realpath)', async () => {
-    await symlink(outside, join(workspace, 'link'))
+    await symlink(outside, join(workspace, 'link'), 'junction')
     const path = join(workspace, 'link', 'newdir', 'deep.txt')
     await expect(fs.writeText(await target(path), 'x')).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
     expect(existsSync(join(outside, 'newdir'))).toBe(false)
@@ -210,6 +210,25 @@ describe('danger-full-access', () => {
     const path = join(outside, 'free.txt')
     await fs.writeText(await target(path), 'free')
     expect(await readFile(path, 'utf8')).toBe('free')
+  })
+})
+
+describe('additional workspace roots', () => {
+  it('writes and edits in an approved sibling without granting other siblings', async () => {
+    await boot('workspace-write')
+    const policy = { mode: 'workspace-write', workspaceRoot: workspace, additionalWorkspaceRoots: [outside] } as const
+    const path = join(outside, 'shared.txt')
+    await fs.writeText(await target(path), 'original', undefined, undefined, policy)
+    await fs.editText(await target(path), { oldString: 'original', newString: 'updated', replaceAll: false },
+      undefined, undefined, policy)
+    expect(await readFile(path, 'utf8')).toBe('updated')
+    const unapproved = join(base, 'unapproved.txt')
+    await expect(fs.writeText(await target(unapproved), 'denied', undefined, undefined, policy))
+      .rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(existsSync(unapproved)).toBe(false)
+    await expect(fs.writeText(await target(path), 'denied', undefined, undefined,
+      { ...policy, mode: 'read-only' })).rejects.toMatchObject({ code: 'FS_SANDBOX_DENIED' })
+    expect(await readFile(path, 'utf8')).toBe('updated')
   })
 })
 
