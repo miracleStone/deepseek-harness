@@ -112,7 +112,7 @@ kind: "package-reference"
 
 #### 模型看到什么
 
-每个 agent 会话的当前运行时上下文快照中都有一项 `sandbox:policy` 贡献。它不枚举已挂载的能力。工具插件继续负责操作与升权引导，批准策略单独贡献给同一份快照，计划引导仍由 `dsh-plan-mode` 的系统段落管理。
+每个 agent 会话的当前运行时上下文快照中都有一项 `sandbox:policy` 贡献。它不枚举已挂载的能力。工具插件继续负责操作与升权引导，批准策略单独贡献给同一份快照，计划引导仍由 `dsh-plan-mode` 的系统段落管理。多文件夹 Session 在每种模式下还会收到必需的工作区文件夹上下文，即使可选运行时上下文被禁用也是如此。
 
 ##### 只读
 
@@ -138,7 +138,7 @@ Current DSH file policy: workspace-write. Any available operation enforced by th
 Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under these session workspace folders: ["<first write root>","<additional folder>"]. Some platform temporary areas may also be writable.
 ```
 
-多文件夹 Session 在每种模式下还会收到以下必需上下文，包括可选运行时上下文被禁用时：
+##### 每种模式下的工作区文件夹
 
 ```markdown
 Session workspace folders: ["<session cwd>","<additional folder>"]. Relative paths and commands use the current working directory; use absolute paths for the other folders.

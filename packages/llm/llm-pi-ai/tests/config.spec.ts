@@ -57,6 +57,41 @@ describe('reasoning schema boundary', () => {
   })
 })
 
+describe('Codex service tier configuration', () => {
+  it.each(['default', 'fast'] as const)('preserves %s through schema parsing and catalog resolution', (serviceTier) => {
+    const parsed = Config({ providers: { 'openai-codex': { serviceTier } } }).providers.get()
+    expect(parsed['openai-codex']).toHaveProperty('serviceTier', serviceTier)
+    const resolved = resolveProfiles(structuredClone(parsed) as Options['providers']).get('openai-codex')
+    expect(resolved).toHaveProperty('serviceTier', serviceTier)
+    expect(resolved?.piProvider?.getModels().every(model => model.api === 'openai-codex-responses')).toBe(true)
+  })
+
+  it('keeps an omitted tier absent after parsing and resolution', () => {
+    const parsed = Config({ providers: { 'openai-codex': {} } }).providers.get()
+    expect(parsed['openai-codex']?.serviceTier).toBeUndefined()
+    expect(resolveProfiles(structuredClone(parsed) as Options['providers']).get('openai-codex')?.serviceTier).toBeUndefined()
+  })
+
+  it.each(['priority', 'ultrafast', '', 42, true])('rejects the unsupported schema value %j', (serviceTier) => {
+    expect(routeWith({ serviceTier })).toThrow()
+  })
+
+  it.each(['default', 'fast'] as const)('rejects %s on non-Codex routes', (serviceTier) => {
+    for (const provider of ['openai', 'anthropic']) {
+      expect(() => resolveProfiles({ [provider]: { serviceTier } })).toThrow(/serviceTier/)
+    }
+    expect(() => resolveProfiles({ 'acme-gateway': {
+      serviceTier, api: 'openai-completions', baseURL: 'https://acme.test', models: [{ id: 'm' }],
+    } })).toThrow(/serviceTier/)
+  })
+
+  it('checks resolved protocols rather than trusting the Codex route name', () => {
+    expect(() => resolveProfiles({ 'openai-codex': {
+      serviceTier: 'fast', api: 'openai-responses', models: [{ id: 'gpt-5.5' }],
+    } })).toThrow(/serviceTier/)
+  })
+})
+
 describe('modality schema boundary', () => {
   it('rejects a modality pi-ai does not know, at either level', () => {
     expect(configWith({ input: ['audio'] })).toThrow(/expected/)

@@ -53,6 +53,14 @@ Contributions must render non-interactive inline content, such as a colored name
 
 Import this package's `/client` declarations type-only, then register through `ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({ name: 'conversation.input.model.label' }, ModelLabel))`. Derive `ModelLabel` props from `PropsRuntime<'conversation.input.model.label'>`; use provider IDs to choose CSS Module classes and retain `model.name` as the text. Registration follows the declaration and contributing plugin lifetimes. Without a component replacement, styles can target the enclosing label's `data-provider-id` and `data-model-id` attributes in all three placements.
 
+### Inline session status
+
+`conversation.input.model.status` is an additive, session-scoped inline list slot in the trigger after reasoning effort and before the chevron. It renders only when the selected model is in the displayed catalog. Owner props supply the exact selected `provider` and `model` IDs. Contributions render non-interactive inline content and own their session state; they do not replace `conversation.input.model.label`. No contributions add no content.
+
+### Session option rows
+
+`conversation.input.model.options` is a session-scoped list slot below the reasoning row. Owner props provide the saved provider/model IDs (undefined before selection), `locked`, `busy`, `dismiss()`, and `reportFailure(localizedMessage)`. `locked` includes a pending model selection. `dismiss()` closes the menu and synchronously focuses its trigger before another overlay opens; failures use the menu owner's persistent toast. Contributions own their projections, commands, and persistence. Enabled `menuitem`, `menuitemradio`, `menuitemcheckbox`, and `switch` buttons join the selector's keyboard traversal; hidden and disabled buttons are skipped.
+
 ### Unroutable sessions
 
 Catalog availability does not block sending with a saved selection; request execution reports missing credentials or unavailable models. Refreshes and refresh failures retain the last displayed selection and groups. A Host reset clears that display. Sign-out hides the account provider from the picker while preserving the saved provider/model ID and reasoning effort. Signing in restores the catalog name when that model is available again. Existing session logs remain unchanged.
@@ -60,8 +68,6 @@ Catalog availability does not block sending with a saved selection; request exec
 ### Selection failures
 
 When another writer owns the Session, model-selection failures tell the user to quit other running DSH instances and retry.
-
-The session-scoped `conversation.input.model.options` list slot appends controls below model and reasoning selection. Owner props expose `locked`, `reportFailure(message)`, and `dismiss()`, which closes the menu and synchronously focuses its trigger before another overlay opens; contributions read their own projections and supply narrow commands. Enabled switch buttons participate in the menu’s keyboard navigation.
 
 -----
 

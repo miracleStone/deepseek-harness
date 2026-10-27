@@ -309,7 +309,7 @@ interface LlmImageRequestPricing {
 
 ## `ResolvedRetryPolicy`
 
-重试配置会在路由注册前解析为不可变的可辨识联合。normal mode 携带 `mode: 'normal'`、有限的 `maxRetries`、`retryableCodes`，以及必填的 `initialDelayMs`、`maxDelayMs` 与 `jitterRatio`；always mode 携带 `mode: 'always'` 和相同的必填退避字段，但没有有限上限。省略提供方策略时使用重试五次的 normal 默认值。分层 settings 在切换到 always 模式后可能保留仅属于 normal 的 `maxRetries` 或 `retryableCodes`；解析器会忽略这些未启用字段，并捕获纯 always 策略。`LlmRuntime.providerRetryPolicy(provider)` 返回注册值；调用选定实际提供服务的注册后，`llmRetryPolicyOf(stream)` 返回从中捕获的值，因此之后释放或替换路由都无法改变进行中失败的恢复策略。可选配置输入字段由[生成的配置目录](../config-catalog.zh.md)列出。
+重试配置会在路由注册前解析为不可变的可辨识联合。normal mode 携带 `mode: 'normal'`、有限的 `maxRetries`、`retryableCodes`，以及必填的 `initialDelayMs`、`maxDelayMs` 与 `jitterRatio`；always mode 携带 `mode: 'always'` 和相同的必填退避字段，但没有有限上限。省略提供方策略时使用重试 20 次的 normal 默认值。分层 settings 在切换到 always 模式后可能保留仅属于 normal 的 `maxRetries` 或 `retryableCodes`；解析器会忽略这些未启用字段，并捕获纯 always 策略。`LlmRuntime.providerRetryPolicy(provider)` 返回注册值；调用选定实际提供服务的注册后，`llmRetryPolicyOf(stream)` 返回从中捕获的值，因此之后释放或替换路由都无法改变进行中失败的恢复策略。可选配置输入字段由[生成的配置目录](../config-catalog.zh.md)列出。
 
 ## `AppIdentity`：应用归属
 
@@ -860,6 +860,10 @@ interface LlmCallConfigAdapterDefaults {
 }
 ```
 
+## Codex 处理档位解析
+
+`PiAiServiceTierRequest` 携带 `provider`、`model`、可选的 `sessionId` 和可选的 `defaultTier`（`default` 或 `fast`）。pi-ai 适配器在 Codex 请求分派时、凭据查找前，通过 `llm-pi-ai/service-tier` 解析一次该运行偏好；不会改变消息内容或推理控制项。解析失败会阻止网络 I/O。[pi-ai 适配器参考](../../packages/llm/llm-pi-ai/README.zh.md)负责说明档位选择与账号限制。
+
 ## DeepSeek 官方请求扩展
 
 `ctx.deepseekLlmApiExtensions` 是用于向 `deepseek-official` 请求添加顶层字段的提供方特定注册表。贡献插件通过 `register(field, provider)` 认领一个字段；适配器在序列化基础正文后调用 `prepare(request)`，并在 HTTP 前合并返回字段。已准备的 `accept()` 事务会在 2xx 后运行，因此贡献方可以提交交付状态，而不会把传输失败或提供方拒绝当作接受。贡献方准备时抛错会被记录并在该次请求中省略，接受失败只记录告警而不使请求失败；与基础字段冲突时使用 `REQUEST_EXTENSION` 并使模型请求失败。合并后的正文无法序列化时，请求不带扩展字段发出，跳过接受，并由提供方插件记录被省略的字段名。
@@ -1284,6 +1288,25 @@ Prepare headers for one pi-ai inference call, excluding model discovery. Listene
  * @returns headers passed to pi-ai after Harness attribution is applied.
  */
 'llm-pi-ai/request-headers'(request: PiAiRequestHeaderContext, headers: Headers, next: () => Headers): Headers
+```
+
+Source: [`packages/llm/llm-pi-ai/src/index.ts`](../../packages/llm/llm-pi-ai/src/index.ts)
+
+<a id="llm-pi-aiservice-tier--waterfall"></a>
+
+#### `llm-pi-ai/service-tier` — waterfall
+
+Resolve one Codex request's service tier at dispatch without changing its model or reasoning controls. Listeners that do not own the request call next().
+
+```ts cordis-catalog
+/**
+ * Resolve one Codex request's service tier at dispatch without changing its
+ * model or reasoning controls. Listeners that do not own the request call next().
+ * @mode waterfall
+ * @param request - exact request identity and the captured provider preference.
+ * @param next - delegate to the next resolver, ending with the provider preference.
+ */
+'llm-pi-ai/service-tier'( request: PiAiServiceTierRequest, next: () => Promise<'default' | 'fast' | undefined>, ): Promise<'default' | 'fast' | undefined>
 ```
 
 Source: [`packages/llm/llm-pi-ai/src/index.ts`](../../packages/llm/llm-pi-ai/src/index.ts)

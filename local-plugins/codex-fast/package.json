@@ -1,0 +1,31 @@
+{
+  "name": "@local/dsh-codex-fast",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Codex Fast service tier with the existing pi-ai provider configuration and subscription sign-in.",
+  "license": "MIT",
+  "engines": { "dsh": "0.2.1-rc.2" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "exports": {
+    ".": "./adapter.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.png"
+  },
+  "files": ["adapter.js", "cordis.patch.yml", "locale/*.json", "icon.png", "README.md"],
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/cordis-plugin-loader": "~1.0.6",
+    "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-authorization": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-fs": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-launch-environment": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-timeout": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-brand": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-util-values": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "~3.18.5",
+    "@earendil-works/pi-ai": "1.1.0"
+  }
+}

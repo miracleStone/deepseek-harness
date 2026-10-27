@@ -71,7 +71,7 @@ kind: "package-reference"
 | `fileExpiresAfterSeconds` | `604,800` | 请求的上传图片生存期与本地复用期限 |
 | `fileRefreshMarginSeconds` | `3,600` | 低于此剩余复用期时替换 id |
 | `fileQuotaCleanupBatch` | `100` | 配额重试前删除的、归 harness 所有的最旧文件数 |
-| `retryPolicy` | normal，5 次重试 | 由 `dsh-llm-retry` 执行的提供方自有重试策略 |
+| `retryPolicy` | normal，20 次重试 | 由 `dsh-llm-retry` 执行的提供方自有重试策略 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-llm-deepseek-api-key)是每个受支持字段及其 JSDoc 的穷尽式真源。
 

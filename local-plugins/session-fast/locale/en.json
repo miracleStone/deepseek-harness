@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session Fast switch",
+    "description": "Set Codex Fast independently for each session below the reasoning control. Keeps the existing sign-in and reasoning strength; Fast uses more quota."
+  }
+}

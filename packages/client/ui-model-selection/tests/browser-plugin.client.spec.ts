@@ -124,11 +124,17 @@ async function bench(locale: 'zh' | 'en' = 'zh') {
   const seats = new Map<string, {
     inject: ((sessionId: SessionId) => ModelSelectInjected) | undefined
     locale: string | undefined
+    children: Record<string, { kind: string; scope: string; inline?: boolean }> | undefined
   }>()
   ctx.provide('slots', {
     inject(_name: string, callback: () => () => void) { return callback() },
-    register(options: { name: string; locale?: string; inject?: (sessionId: SessionId) => ModelSelectInjected }) {
-      seats.set(options.name, { inject: options.inject, locale: options.locale })
+    register(options: {
+      name: string
+      locale?: string
+      inject?: (sessionId: SessionId) => ModelSelectInjected
+      children?: Record<string, { kind: string; scope: string; inline?: boolean }>
+    }) {
+      seats.set(options.name, { inject: options.inject, locale: options.locale, children: options.children })
       return () => { seats.delete(options.name) }
     },
   })
@@ -225,6 +231,11 @@ describe('ui-model-selection dual entry', () => {
     expect(b.seat().inject).toBeTypeOf('function')
     // Copy rides the standard locale seat.
     expect(b.seat().locale).toBe('model')
+    expect(b.seat().children).toEqual({
+      'conversation.input.model.label': { kind: 'single', scope: 'session', inline: true },
+      'conversation.input.model.status': { kind: 'list', scope: 'session', inline: true },
+      'conversation.input.model.options': { kind: 'list', scope: 'session' },
+    })
   })
 
   it.each([['zh', '新'], ['en', 'New']] as const)('resolves seat badge text for the active %s locale', async (locale, expected) => {

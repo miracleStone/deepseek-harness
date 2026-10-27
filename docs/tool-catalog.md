@@ -2089,7 +2089,7 @@ Delegate a self-contained task to a subagent (a separate agent that works in its
     },
     "reasoning_effort": {
       "type": "string",
-      "description": "Model-specific reasoning effort id."
+      "description": "Adapter-owned reasoning effort for the effective child route. Omit to inherit a compatible configured/parent effort or use a newly selected model's default."
     }
   },
   "required": [

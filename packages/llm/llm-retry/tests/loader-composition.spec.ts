@@ -20,14 +20,16 @@ import * as retry from '../src/index.ts'
 let root: string | undefined
 let context: Context | undefined
 
-class TransientOnceAdapter extends LlmAdapter {
+class TransientAdapter extends LlmAdapter {
   requests = 0
   private readonly retryPolicy = resolveRetryPolicy({
     mode: 'normal',
-    maxRetries: 1,
-    retryableCodes: ['RATE_LIMIT', 'SERVER'],
     backoff: { initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0 },
   }, 'loader test provider retryPolicy')
+
+  constructor(private readonly failures: number) {
+    super()
+  }
 
   override providerRetryPolicy(_provider: string): ResolvedRetryPolicy {
     return this.retryPolicy
@@ -35,7 +37,7 @@ class TransientOnceAdapter extends LlmAdapter {
 
   async * stream(_options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests += 1
-    if (this.requests === 1) throw new LlmError('temporary outage', 'SERVER')
+    if (this.requests <= this.failures) throw new LlmError('temporary outage', 'SERVER')
     yield { type: 'block-start', index: 0, blockType: 'text' }
     yield { type: 'text-delta', index: 0, text: 'recovered' }
     yield { type: 'block-end', index: 0, block: { type: 'text', text: 'recovered' } }
@@ -90,7 +92,9 @@ describe('real Loader composition', () => {
   // Real-Loader composition resolves workspace packages through tsx at test
   // time; first resolution after the host/client program split is slow enough
   // to trip the default 5s budget on cold caches.
-  it('loads provider-supplied policy and records recovery through the shipping loop', { timeout: 60_000 }, async () => {
+  it.each([20, 21])('applies the default retry budget after %i failures through the shipping loop', {
+    timeout: 60_000,
+  }, async (failures) => {
     const loaded = await loadYaml([
       "- name: '@deepseek-ai/dsh-llm'",
       "- name: '@deepseek-ai/dsh-session'",
@@ -109,17 +113,23 @@ describe('real Loader composition', () => {
     expect(unloaded).toEqual([])
     expect(loaded.agents).toBeInstanceOf(AgentRegistry)
 
-    const adapter = new TransientOnceAdapter()
+    const adapter = new TransientAdapter(failures)
     loaded.llm.registerAdapter(['mock'], adapter)
     const agent = await loaded.agentLoop.create(SessionId('loader-retry'), { provider: 'mock', model: 'mock' })
     agent.followup(createUserMessage({ content: [{ type: 'text', text: 'recover' }], source: { kind: 'user' } }))
     await agent.whenIdle()
 
-    expect(adapter.requests).toBe(2)
-    expect(agent.session.snapshotEvents().filter(event => event.type === 'llm/retry')).toHaveLength(1)
-    expect(agent.session.deriveMessages().at(-1)).toMatchObject({
-      role: 'assistant',
-      content: [{ type: 'text', text: 'recovered' }],
-    })
+    expect(adapter.requests).toBe(21)
+    const events = agent.session.snapshotEvents()
+    expect(events.filter(event => event.type === 'llm/retry').map(event => ({
+      retry: event.data.retry,
+      maxRetries: event.data.mode === 'normal' ? event.data.maxRetries : undefined,
+    }))).toEqual(Array.from({ length: 20 }, (_, index) => ({ retry: index + 1, maxRetries: 20 })))
+    expect(events.filter(event => event.type === 'assistant/attempt')).toHaveLength(failures)
+    expect(agent.session.deriveMessages().filter(message => message.role === 'assistant')).toEqual(
+      failures === 20
+        ? [expect.objectContaining({ content: [{ type: 'text', text: 'recovered' }] })]
+        : [],
+    )
   })
 })

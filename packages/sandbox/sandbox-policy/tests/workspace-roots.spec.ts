@@ -220,7 +220,9 @@ describe('additional workspace roots', () => {
     expect(owner.additionalRootsOf(session)).toEqual([extra])
     expect(owner.resolve({ session })).toMatchObject({ additionalWorkspaceRoots: [extra] })
     expect(read).not.toHaveBeenCalled()
-    expect(ctx.sessionProjections.checkpoint(session)).not.toHaveProperty('sandboxWorkspaceRoots')
+    expect(ctx.sessionProjections.checkpoint(session)).toMatchObject({
+      sandboxWorkspaceRoots: { ver: 1, seq: 0, val: [extra] },
+    })
   })
 
   it('includes the configured primary root in folder context for a legacy Session without cwd', async () => {

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Session model options",
+    "description": "Preserves model and reasoning selection and adds keyboard-accessible per-session option rows below them."
+  }
+}

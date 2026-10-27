@@ -270,7 +270,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
         ...effortSelectionEnabled ? {
           reasoning_effort: {
             type: 'string' as const,
-            description: 'Model-specific reasoning effort id.',
+            description: 'Adapter-owned reasoning effort for the effective child route. Omit to inherit a compatible configured/parent effort or use a newly selected model\'s default.',
           },
         } : {},
       },

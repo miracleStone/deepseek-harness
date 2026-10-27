@@ -1,0 +1,5 @@
+/adapter.js
+/host.js
+/host-v*.js
+/client-v*.js
+/cordis.patch.yml

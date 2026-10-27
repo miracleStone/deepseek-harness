@@ -20,6 +20,7 @@ function props(enabled: boolean | undefined, selectTeamMode = vi.fn(async () => 
     useProjection: (key: string) => key === 'modelSelection'
       ? requestedModel === 'loading' ? undefined : { lastUsed: requestedModel ? { provider: 'mock', model: 'mock' } : null, next: { provider: 'mock', model: 'mock' } }
       : enabled === undefined ? undefined : { enabled, tasks: [] },
+    provider: undefined, model: undefined, busy: false,
     locked: false, dismiss: vi.fn(), reportFailure: vi.fn(), selectTeamMode, requestDisableConfirmation: vi.fn(),
     t: makeTranslate(zh),
   } as TeamModeToggleProps

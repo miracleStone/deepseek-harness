@@ -370,7 +370,7 @@ describe('LlmRuntime', () => {
     expect(ctx.llm.providerRetryPolicy('configured')).toBe(configured)
     expect(ctx.llm.providerRetryPolicy('defaulted')).toMatchObject({
       mode: 'normal',
-      maxRetries: 5,
+      maxRetries: 20,
     })
     expect(() => ctx.llm.providerRetryPolicy('missing')).toThrow(
       expect.objectContaining({ code: 'NO_ADAPTER' }),

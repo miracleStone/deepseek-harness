@@ -22,6 +22,23 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /** Subagent catalog and read-only composer copy. */
     'subagent': SubagentKey
   }
+
+  interface SlotMap {
+    /** Metadata badge rendered inside one root-session catalog row. */
+    'conversation.session.header.actions.subagent.item.meta': {
+      kind: 'single'
+      scope: 'session'
+      inline: true
+      owner: { childSessionId: SessionId }
+    }
+    /** Metadata badge rendered inside one subagent lineage row. */
+    'subagent.lineage.item.meta': {
+      kind: 'single'
+      scope: 'session'
+      inline: true
+      owner: { childSessionId: SessionId }
+    }
+  }
 }
 
 export type {
@@ -75,6 +92,9 @@ export function apply(ctx: ClientContext): void {
     () => ctx.slots.register({
       name: 'conversation.session.header.lineage',
       locale: NS,
+      children: {
+        'subagent.lineage.item.meta': { kind: 'single', scope: 'session', inline: true },
+      },
       inject: catalogActions,
     }, SubagentHeaderLineage),
   )
@@ -89,7 +109,10 @@ export function apply(ctx: ClientContext): void {
       inject: (sessionId): SubagentCatalogActionInjected => ({
         ...catalogActions(sessionId), hooks: { footerAvailable },
       }),
-      children: { 'conversation.session.header.actions.subagent.footer': { kind: 'list', scope: 'session' } },
+      children: {
+        'conversation.session.header.actions.subagent.footer': { kind: 'list', scope: 'session' },
+        'conversation.session.header.actions.subagent.item.meta': { kind: 'single', scope: 'session', inline: true },
+      },
     }, SubagentCatalogAction),
   )
   ctx.slots.inject(

@@ -6,6 +6,7 @@
   - tablist:
     - tab "Chat" [selected]
     - tab "Trajectory"
+  - button "More conversation views"
 - text: 只回复 MESSAGES_WEB_READY，不调用工具。 {{clock}}
 - button "Copy"
 - status: Completed

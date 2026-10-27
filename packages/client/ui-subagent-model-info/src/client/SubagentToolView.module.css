@@ -1,0 +1,54 @@
+.expandedCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-top: 4px;
+  background: var(--dsw-alias-bg-l1);
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-md);
+  font-size: var(--dsw-font-size-xs);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.fieldGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  row-gap: 4px;
+}
+
+.fieldLabel {
+  color: var(--dsw-alias-label-tertiary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.fieldValue {
+  color: var(--dsw-alias-label-primary);
+  word-break: break-all;
+}
+
+.taskSection {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 0.5px solid var(--dsw-alias-border-l1);
+}
+
+.taskText {
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.outputSection {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 0.5px solid var(--dsw-alias-border-l1);
+}
+
+.modelTag {
+  margin-left: 6px;
+  font-weight: normal;
+}

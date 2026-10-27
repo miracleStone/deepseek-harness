@@ -35,7 +35,7 @@ Choose this adapter when the same composition serves several providers, when a r
 
 ### Configure provider routes
 
-Each profile may set a `retryPolicy`; omission uses normal mode with five retries. `apiKeyEnv` is a credential reference resolved per request through the harness credential seam, so no secret enters the configuration file; a reference that resolves to nothing fails the request with `MISSING_CREDENTIAL`. Omitting it leaves the route configured-but-keyless, which for an installed catalog route defers to pi-ai's provider-native ambient discovery.
+Each profile may set a `retryPolicy`; omission uses normal mode with 20 retries. `apiKeyEnv` is a credential reference resolved per request through the harness credential seam, so no secret enters the configuration file; a reference that resolves to nothing fails the request with `MISSING_CREDENTIAL`. Omitting it leaves the route configured-but-keyless, which for an installed catalog route defers to pi-ai's provider-native ambient discovery.
 
 ```yaml
 - name: '@deepseek-ai/dsh-llm-pi-ai'
@@ -90,7 +90,7 @@ Each profile may set a `retryPolicy`; omission uses normal mode with five retrie
 | `maxRequestImageBytes` | `20 MiB` | Aggregate base64 image-payload bound; a request whose retained images exceed it fails with `IMAGE_OFFLOAD_REQUIRED` |
 | `maxRequestImages` | `50` | Retained request-image count bound; a request whose retained images exceed it fails with `IMAGE_OFFLOAD_REQUIRED`. The default follows Azure OpenAI's 50-image limit; raise it on routes whose provider accepts more images |
 | `imageOffloadCountQuantum` | `10`, capped at `maxRequestImages` | Oldest images offloaded per count overflow |
-| `retryPolicy` | normal, 5 retries | Provider-owned retry policy executed by `dsh-llm-retry` |
+| `retryPolicy` | normal, 20 retries | Provider-owned retry policy executed by `dsh-llm-retry` |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-llm-pi-ai) is the exhaustive source for every accepted field and its JSDoc.
 
@@ -109,6 +109,14 @@ A profile's `models` list replaces the route's installed catalog rather than ext
 Exact-model metadata lists `reasoning.efforts` from least to greatest selectable effort. A configuration function can select from that list before `prepareCall()` validates the concrete effort. The adapter receives only the resolved controls. Selecting `off` does not guarantee disabled reasoning: a protocol that expresses it by omitting the reasoning field leaves the gateway's default in effect. Reasoning tokens at any selected level count toward the request's output cap.
 
 For self-hosted Chat Completions endpoints, `thinkingTokenBudgetField` selects the reasoning-budget parameter, and `vllmPriority` sets an integer scheduler priority when the server enables priority scheduling. Template arguments accept `$var: thinking.budget`. `openai-responses` gateways can set `supportsMaxOutputTokens: false` to omit `max_output_tokens`; Azure and Codex transports ignore this shared compatibility field. These controls are opt-in; catalog-owned Anthropic effort and fallback capabilities are not configurable switches.
+
+### Choose Codex Standard or Fast processing
+
+Set `providers.openai-codex.serviceTier` to `fast` to request Fast processing with your existing ChatGPT subscription sign-in, or `default` to request Standard processing. Omission sends no tier preference. This field accepts only routes whose models all use `openai-codex-responses`; API-key OpenAI routes and other protocols reject it. Fast maps to the wire value `service_tier: priority` and does not lower `reasoning` or change the selected model.
+
+Fast consumes subscription usage at higher rates; [OpenAI's speed guide](https://learn.chatgpt.com/docs/agent-configuration/speed.md) owns availability and billing. OpenAI decides whether the account and model can use the requested tier. Provider errors remain failures without switching tiers, and local SDK cost estimates do not confirm priority allocation or measure remaining subscription quota.
+
+The `llm-pi-ai/service-tier` waterfall resolves each Codex request's operational tier from its provider, model, optional Session id, and captured profile preference. Unhandled requests retain that preference. A session-specific resolver returns `default` to disable a Fast profile; `undefined` sends no tier preference. Resolution runs once at dispatch before credential lookup, and later preference changes do not alter that dispatched request. Other protocols do not invoke the resolver; a resolver failure stops the request before network I/O.
 
 ### Change configuration at runtime
 

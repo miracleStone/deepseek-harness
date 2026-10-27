@@ -82,6 +82,73 @@ beforeEach(() => {
 
 afterEach(cleanup)
 
+describe('ModelSelect option rows', () => {
+  it('places extensions after effort, skips disabled rows, and restores the owner on disposal', async () => {
+    const runtime = await SlotTestRuntime.create()
+    onTestFinished(() => runtime.dispose())
+    const id = SessionId('model-options')
+    await runtime.sessions.add({ id })
+    const session = runtime.sessions.retainFor(runtime.ctx, id)
+    const directory = createSnapshotStore(state())
+    const toggle = vi.fn()
+    await runtime.root.declare({
+      'conversation.input.model.label': { kind: 'single', scope: 'session', inline: true },
+      'conversation.input.model.status': { kind: 'list', scope: 'session', inline: true },
+      'conversation.input.model.options': { kind: 'list', scope: 'session' },
+    }, ({ renderSlot, SessionProvider }) => <SessionProvider session={session}>
+      <ModelSelect locked={false} available directory={directory} load={vi.fn()} resolveText={resolveText} select={vi.fn()} t={t} renderSlot={renderSlot} />
+    </SessionProvider>)
+    const plugin = await runtime.mount({ inject: ['slots'], apply(ctx) {
+      ctx.slots.inject('conversation.input.model.options', () => ctx.slots.register({
+        name: 'conversation.input.model.options', id: 'test-fast',
+      }, ({ provider, model, locked, busy, reportFailure, dismiss }) => <>
+        <button type="button" role="menuitem" disabled>Unavailable</button>
+        <button type="button" role="menuitemcheckbox" aria-checked="false" disabled={locked || busy} onClick={toggle}>Fast {provider}/{model}</button>
+        <button type="button" role="menuitem" aria-disabled="true">Unavailable by ARIA</button>
+        <span hidden><button type="button" role="menuitem">Hidden option</button></span>
+        <button type="button" role="switch" aria-checked="false" disabled={locked} onClick={toggle}>Team</button>
+        <button type="button" role="menuitem" onClick={() => { reportFailure('Failed to save Fast') }}>Report error</button>
+        <button type="button" role="menuitem" onClick={() => {
+          dismiss()
+          expect(document.activeElement).toBe(screen.getByRole('button', { name: /^选择模型/ }))
+        }}>Dismiss option</button>
+      </>))
+    } })
+    runtime.renderRoot()
+    const trigger = screen.getByRole('button', { name: /^选择模型/ })
+    fireEvent.click(trigger)
+    const effort = screen.getByRole('menuitem', { name: /^推理等级/ })
+    const fast = screen.getByRole('menuitemcheckbox')
+    expect(fast.textContent).toBe('Fast deepseek-official/deepseek-v4-flash')
+    expect(effort.compareDocumentPosition(fast) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    effort.focus()
+    fireEvent.keyDown(effort, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(fast)
+    fireEvent.keyDown(fast, { key: 'Tab' })
+    expect(toggle).toHaveBeenCalledOnce()
+    fireEvent.keyDown(fast, { key: 'ArrowDown' })
+    const team = screen.getByRole('switch', { name: 'Team' })
+    expect(document.activeElement).toBe(team)
+    fireEvent.keyDown(team, { key: 'Tab' })
+    expect(toggle).toHaveBeenCalledTimes(2)
+    act(() => { directory.update(snapshot => { snapshot.pending = { provider: 'route', model: 'pending' } }) })
+    expect(fast.disabled).toBe(true)
+    expect(team.disabled).toBe(true)
+    act(() => { directory.update(snapshot => { snapshot.pending = null }) })
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Report error' }))
+    expect(screen.getByText('Failed to save Fast')).toBeTruthy()
+    fireEvent.keyDown(fast, { key: 'Escape' })
+    await waitFor(() => { expect(document.activeElement).toBe(trigger) })
+    expect(screen.queryByRole('menuitemcheckbox')).toBeNull()
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Dismiss option' }))
+    await waitFor(() => { expect(screen.queryByRole('menuitemcheckbox')).toBeNull() })
+    await act(async () => { await plugin.dispose() })
+    fireEvent.click(trigger)
+    expect(screen.queryByRole('menuitemcheckbox')).toBeNull()
+  })
+})
+
 describe('ModelSelect label slot', () => {
   it('distinguishes identical model names and ids by provider across all placements and restores labels on unload', async () => {
     const runtime = await SlotTestRuntime.create()
@@ -99,6 +166,7 @@ describe('ModelSelect label slot', () => {
     })
     await runtime.root.declare({
       'conversation.input.model.label': { kind: 'single', scope: 'session', inline: true },
+      'conversation.input.model.status': { kind: 'list', scope: 'session', inline: true },
       'conversation.input.model.options': { kind: 'list', scope: 'session' },
     }, ({ renderSlot, SessionProvider }) => <SessionProvider session={session}>
       <ModelSelect locked={false} available directory={directory} load={vi.fn()}
@@ -203,6 +271,70 @@ describe('ModelSelect catalog badges', () => {
     } })
     expect(screen.getByRole('button', { name: '选择模型，当前 DeepSeek-V4.1-Flash' }).textContent).toBe('DeepSeek-V4.1-Flash [info]')
     expect(screen.queryByText('新')).toBeNull()
+  })
+})
+
+describe('ModelSelect status slot', () => {
+  it('adds ordered inline statuses after effort without replacing labels and follows the exact selection', async () => {
+    const runtime = await SlotTestRuntime.create()
+    onTestFinished(() => runtime.dispose())
+    const id = SessionId('model-status')
+    await runtime.sessions.add({ id })
+    const session = runtime.sessions.retainFor(runtime.ctx, id)
+    const groups = ['first-route', 'second-route'].map(provider => ({
+      id: provider, name: provider, models: [{ id: 'same-model', name: 'Same model', reasoning }],
+    }))
+    const directory = createSnapshotStore(state({ groups, current: { provider: 'first-route', model: 'same-model' } }))
+    await runtime.root.declare({
+      'conversation.input.model.label': { kind: 'single', scope: 'session', inline: true },
+      'conversation.input.model.status': { kind: 'list', scope: 'session', inline: true },
+      'conversation.input.model.options': { kind: 'list', scope: 'session' },
+    }, ({ renderSlot, SessionProvider }) => <SessionProvider session={session}>
+      <ModelSelect locked={false} available directory={directory} load={vi.fn()} resolveText={resolveText} select={vi.fn()} t={t} renderSlot={renderSlot} />
+    </SessionProvider>)
+    const label = await runtime.mount({ inject: ['slots'], apply(ctx) {
+      ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({
+        name: 'conversation.input.model.label',
+      }, ({ model }) => <span>Decorated {model.name}</span>))
+    } })
+    const later = await runtime.mount({ inject: ['slots'], apply(ctx) {
+      ctx.slots.inject('conversation.input.model.status', () => ctx.slots.register({
+        name: 'conversation.input.model.status', id: 'later', order: 20,
+      }, () => <span>Extra status</span>))
+    } })
+    const earlier = await runtime.mount({ inject: ['slots'], apply(ctx) {
+      ctx.slots.inject('conversation.input.model.status', () => ctx.slots.register({
+        name: 'conversation.input.model.status', id: 'earlier', order: 10,
+      }, ({ provider, model }) => <span>{provider}/{model}</span>))
+    } })
+    runtime.renderRoot()
+    const trigger = screen.getByRole('button', { name: '选择模型，当前 Same model，推理等级 High' })
+    expect(trigger.textContent).toBe('Decorated Same modelHighfirst-route/same-modelExtra status')
+    expect(trigger.querySelector('div')).toBeNull()
+    const status = screen.getByText('first-route/same-model')
+    expect(screen.getByText('High').compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(status.compareDocumentPosition(trigger.lastElementChild!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    act(() => { directory.update((snapshot) => { snapshot.current = { provider: 'second-route', model: 'same-model' } }) })
+    expect(screen.getByText('second-route/same-model')).toBeTruthy()
+    expect(screen.queryByText('first-route/same-model')).toBeNull()
+    await act(async () => { await earlier.dispose() })
+    expect(trigger.textContent).toBe('Decorated Same modelHighExtra status')
+    await act(async () => { await later.dispose() })
+    expect(runtime.slots.entries('conversation.input.model.status')).toHaveLength(0)
+    expect(trigger.textContent).toBe('Decorated Same modelHigh')
+    await act(async () => { await label.dispose() })
+    expect(trigger.textContent).toBe('Same modelHigh')
+  })
+
+  it('does not render statuses for loading, absent, or missing catalog selections', () => {
+    const directory = createSnapshotStore(state({ groups: [], status: 'loading' }))
+    const renderSlot = vi.fn(() => null)
+    render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} resolveText={resolveText} select={vi.fn()} t={t} renderSlot={renderSlot} />)
+    expect(renderSlot).not.toHaveBeenCalled()
+    act(() => { directory.set(state({ current: null })) })
+    expect(renderSlot).not.toHaveBeenCalled()
+    act(() => { directory.set(state({ current: { provider: 'missing', model: 'missing' } })) })
+    expect(renderSlot).not.toHaveBeenCalled()
   })
 })
 

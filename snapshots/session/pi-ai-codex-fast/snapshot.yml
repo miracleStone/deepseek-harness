@@ -1,0 +1,10 @@
+version: 1
+scenario: pi-ai-codex-fast
+profile: headless
+composition: pi-ai-codex-fast
+recording: authored
+header:
+  class: pi-ai-codex-fast
+  pin: true
+environment:
+  PI_CODEX_SNAPSHOT_TOKEN: e30.eyJodHRwczovL2FwaS5vcGVuYWkuY29tL2F1dGgiOnsiY2hhdGdwdF9hY2NvdW50X2lkIjoic25hcHNob3QtYWNjb3VudCJ9fQ.fixture

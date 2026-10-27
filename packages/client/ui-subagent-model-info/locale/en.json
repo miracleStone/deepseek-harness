@@ -1,0 +1,12 @@
+{
+  "field.model": "Model",
+  "field.reasoningEffort": "Reasoning effort",
+  "field.agent": "Subagent ID",
+  "field.name": "Subagent name",
+  "field.job": "Job ID",
+  "field.task": "Delegated task",
+  "status.started": "Started",
+  "status.error": "Error",
+  "status.reply": "Reply received",
+  "title.subagent": "Create subagent"
+}

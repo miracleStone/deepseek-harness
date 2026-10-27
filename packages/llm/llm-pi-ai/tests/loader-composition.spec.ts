@@ -26,6 +26,19 @@ const truncatedToolCallEvents = [
   '[DONE]',
 ]
 
+// Codex validates the account claim before sending to the loopback fixture.
+const codexPayload = Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'composition-account' } })).toString('base64url')
+const codexToken = `e30.${codexPayload}.fixture`
+const codexItem = { type: 'message', id: 'msg_tier', role: 'assistant', content: [{ type: 'output_text', text: 'hello', annotations: [] }] }
+const codexTextEvents = [
+  JSON.stringify({ type: 'response.created', response: { id: 'resp_composition' } }),
+  JSON.stringify({ type: 'response.output_item.added', output_index: 0, item: codexItem }),
+  JSON.stringify({ type: 'response.output_item.done', output_index: 0, item: codexItem }),
+  JSON.stringify({ type: 'response.completed', response: {
+    id: 'resp_composition', status: 'completed', output: [codexItem], usage: { input_tokens: 3, output_tokens: 1, total_tokens: 4 },
+  } }),
+]
+
 let root: string | undefined
 let context: Context | undefined
 
@@ -39,9 +52,9 @@ afterEach(async () => {
 })
 
 /** Boot the dormant composition: a bare `llm-pi-ai` row with no config at all. */
-async function loadComposition(): Promise<{ ctx: Context; settingsPath: string }> {
+async function loadComposition(key = 'key-from-store'): Promise<{ ctx: Context; settingsPath: string }> {
   root = await mkdtemp(join(tmpdir(), 'dsh-pi-composition-'))
-  await writeFile(join(root, '.credentials.yaml'), 'version: 1\nrefs:\n  PI_COMPOSITION_KEY: key-from-store\n', { mode: 0o600 })
+  await writeFile(join(root, '.credentials.yaml'), `version: 1\nrefs:\n  PI_COMPOSITION_KEY: ${JSON.stringify(key)}\n`, { mode: 0o600 })
 
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
@@ -139,6 +152,109 @@ describe('llm-pi-ai real dormant composition', () => {
     const result = await assemble(ctx, { provider: 'deepseek', model: 'deepseek-flash', messages: [] })
     expect(result.message.content).toEqual([{ type: 'text', text: 'hello' }])
     expect(server.headers[0]?.authorization).toBe('Bearer key-from-store')
+  })
+
+  it.each([
+    { serviceTier: 'default', wireTier: 'default' },
+    { serviceTier: 'fast', wireTier: 'priority' },
+  ])('loads a Codex $serviceTier tier from the profile patch and sends $wireTier', async ({ serviceTier, wireTier }) => {
+    vi.stubEnv('PI_COMPOSITION_KEY', '')
+    const server = await mockServer(Array.from({ length: 3 }, () => ({ events: codexTextEvents })))
+    const { ctx, settingsPath } = await loadComposition(codexToken)
+
+    await writeFile(settingsPath, [
+      '- id: llm-pi-ai',
+      '  config:',
+      '    providers:',
+      '      openai-codex:',
+      '        apiKeyEnv: PI_COMPOSITION_KEY',
+      `        baseURL: ${server.url}`,
+      '        transport: sse',
+      `        serviceTier: ${serviceTier}`,
+      '        reasoning: high',
+      '        models:',
+      '          - id: gpt-5.5',
+      '',
+    ].join('\n'))
+    await vi.waitFor(() => {
+      expect(ctx.llm.listProviders().map(provider => provider.id)).toEqual(['openai-codex'])
+    }, { timeout: 5000 })
+
+    const overriddenSession = SessionId('tier-override')
+    const otherSession = SessionId('tier-other')
+    const override: 'default' | 'fast' = serviceTier === 'fast' ? 'default' : 'fast'
+    const resolveTier = vi.fn((
+      request: LlmPiAi.PiAiServiceTierRequest,
+      next: () => Promise<'default' | 'fast' | undefined>,
+    ): Promise<'default' | 'fast' | undefined> =>
+      request.sessionId === overriddenSession ? Promise.resolve(override) : next())
+    ctx.on('llm-pi-ai/service-tier', resolveTier)
+    const request = { provider: 'openai-codex', model: 'gpt-5.5', messages: [] }
+    const result = await assemble(ctx, request)
+    await assemble(ctx, { ...request, sessionId: overriddenSession })
+    await assemble(ctx, { ...request, sessionId: otherSession })
+    expect(result.finish).toEqual({ kind: 'stop' })
+    expect(result.usage).toEqual({ inputTokens: 3, outputTokens: 1, totalTokens: 4 })
+    expect(result.message.source).toMatchObject({ kind: 'model', provider: 'openai-codex', model: 'gpt-5.5',
+      replayState: { response: { kind: 'pi-ai', version: 2, model: 'gpt-5.5' } } })
+    expect(server.paths).toEqual(Array.from({ length: 3 }, () => '/codex/responses'))
+    expect(server.requests.map(body => (body as { service_tier: string }).service_tier))
+      .toEqual([wireTier, wireTier === 'priority' ? 'default' : 'priority', wireTier])
+    expect(resolveTier).toHaveBeenCalledTimes(3)
+    expect(resolveTier.mock.calls.map(([input]) => input.sessionId)).toEqual([undefined, overriddenSession, otherSession])
+    for (const body of server.requests) {
+      expect(body).toHaveProperty('reasoning.effort', 'high')
+      expect(body).not.toHaveProperty('service_tier', 'fast')
+    }
+    expect(server.headers[0]?.authorization).toBe(`Bearer ${codexToken}`)
+  })
+
+  it('composes Fast tier resolution with request-header hooks in the Loader-mounted native Codex stream', async () => {
+    vi.stubEnv('PI_COMPOSITION_KEY', '')
+    const server = await mockServer([{ events: codexTextEvents }])
+    const { ctx, settingsPath } = await loadComposition(codexToken)
+    await writeFile(settingsPath, [
+      '- id: llm-pi-ai', '  config:', '    providers:', '      openai-codex:',
+      '        apiKeyEnv: PI_COMPOSITION_KEY', `        baseURL: ${server.url}`,
+      '        transport: sse', '        serviceTier: default', '        reasoning: high',
+      '        headers:', '          X-Tenant: old-tenant', '          x-tenant: profile-tenant',
+      '          User-Agent: profile-agent', '        models:', '          - id: gpt-5.5', '',
+    ].join('\n'))
+    await vi.waitFor(() => {
+      expect(ctx.llm.listProviders().map(provider => provider.id)).toEqual(['openai-codex'])
+    }, { timeout: 5000 })
+
+    const sessionId = SessionId('fast-headers')
+    const resolveTier = vi.fn((input: LlmPiAi.PiAiServiceTierRequest) => {
+      expect(input).toEqual({ provider: 'openai-codex', model: 'gpt-5.5', sessionId, defaultTier: 'default' })
+      return Promise.resolve('fast' as const)
+    })
+    ctx.on('llm-pi-ai/service-tier', resolveTier)
+    const prepareHeaders = vi.fn((input: LlmPiAi.PiAiRequestHeaderContext, headers: Headers, next: () => Headers) => {
+      expect(input).toEqual({ provider: 'openai-codex', model: 'gpt-5.5', baseURL: server.url, sessionId })
+      expect(Object.isFrozen(input)).toBe(true)
+      expect(headers.get('x-tenant')).toBe('profile-tenant')
+      headers.set('X-Tenant', 'hook-tenant')
+      headers.set('x-request-session', String(input.sessionId))
+      headers.set('USER-AGENT', 'hook-agent')
+      return next()
+    })
+    const removeHeaders = ctx.on('llm-pi-ai/request-headers', prepareHeaders)
+    const request = { provider: 'openai-codex', model: 'gpt-5.5', messages: [], sessionId }
+    const result = await assemble(ctx, request)
+    expect(result.finish).toEqual({ kind: 'stop' })
+    expect(server.requests).toHaveLength(1)
+    expect(server.requests[0]).toMatchObject({ model: 'gpt-5.5', service_tier: 'priority', reasoning: { effort: 'high' } })
+    expect(server.headers[0]).toMatchObject({
+      'x-tenant': 'hook-tenant', 'x-request-session': sessionId, 'user-agent': userAgent(),
+    })
+    expect(prepareHeaders).toHaveBeenCalledTimes(1)
+    removeHeaders()
+    ctx.on('llm-pi-ai/request-headers', () => { throw new Error('Fast header contribution failed') })
+    const rejected = await assemble(ctx, request)
+    expect(rejected.finish).toMatchObject({ kind: 'error', failure: { code: 'REQUEST_HEADERS' } })
+    expect(resolveTier).toHaveBeenCalledTimes(2)
+    expect(server.requests).toHaveLength(1)
   })
 
   it('offers OpenAI sign-in by API key only, while other subscription logins stay', async () => {

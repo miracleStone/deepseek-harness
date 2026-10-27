@@ -84,8 +84,8 @@ describe('independent subagent reasoning effort', () => {
 
   it('uses current adapter support and rejects invalid effort before activation while omission stays lazy', async () => {
     // A completed child wakes the parent and resolves its own model; keep that separate from child preflight.
-    const childWork = Promise.withResolvers<void>()
-    onTestFinished(() => { childWork.resolve() })
+    const childWork = Promise.withResolvers<undefined>()
+    onTestFinished(() => { childWork.resolve(undefined) })
     const ctx = await setup({ provider: 'mock' }, { onStart: () => childWork.promise })
     const adapter = new MockAdapter([], reasoning)
     const resolve = vi.spyOn(adapter, 'resolveModel')

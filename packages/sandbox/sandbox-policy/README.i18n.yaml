@@ -54,8 +54,8 @@
   en: 593b59dbbb02bc8c
   zh: 38fa746346e9bc06
 /deepseek-ai-dsh-sandbox-policy/model-experience/current-file-sandbox-policy/what-the-model-sees:
-  en: 4cd0e0cf93a02d2c
-  zh: 0f8ece0297cf3c0b
+  en: db30b0d0d9b9a69c
+  zh: 8a0699d426675ed3
 /deepseek-ai-dsh-sandbox-policy/model-experience/current-file-sandbox-policy/what-the-model-sees/read-only:
   en: 36f15579c9444eb9
   zh: 289f3c4ce040bfe9
@@ -66,8 +66,11 @@
   en: 4305c3caeef38624
   zh: aa1c4d2d16248128
 /deepseek-ai-dsh-sandbox-policy/model-experience/current-file-sandbox-policy/what-the-model-sees/workspace-write-with-multiple-folders:
-  en: 7ce247709566c672
-  zh: f44be03b6171afab
+  en: 5197e692c0e8d556
+  zh: 26440d4cda35e9b6
+/deepseek-ai-dsh-sandbox-policy/model-experience/current-file-sandbox-policy/what-the-model-sees/workspace-folders-in-every-mode:
+  en: a2b46ff317208b5a
+  zh: aee32604d40386ef
 /deepseek-ai-dsh-sandbox-policy/model-experience/current-file-sandbox-policy/what-the-model-sees/danger-full-access:
   en: 4e28324a011422a1
   zh: bf31ffce30f06a09

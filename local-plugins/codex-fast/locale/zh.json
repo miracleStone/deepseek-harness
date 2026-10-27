@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Codex Fast 加速适配器",
+    "description": "复用现有 ChatGPT 登录请求 Codex Fast 处理，保留其他 pi-ai 路由和思考强度；Fast 会消耗更多订阅额度。"
+  }
+}

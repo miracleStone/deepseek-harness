@@ -48,7 +48,7 @@ const MAX_DECL_CHARS = 1200
  * share that hands down a subsystem instead of a share, and prose that grew
  * into a manual. Every report also lists one line per standard prop seat of its
  * scope, so the widest Session-scope slot (`tool.call.toolview`, with the
- * global and Session access seats) sets the current 125.
+ * global and Session access seats and the subagent model-info renderers) sets the bound.
  */
 const MAX_ENTRY_LINES = 125
 

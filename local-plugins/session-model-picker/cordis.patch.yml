@@ -1,0 +1,5 @@
+- id: ui-model-selection
+  disabled: true
+- insert:
+    - id: session-model-picker
+      name: '@local/dsh-session-model-picker'

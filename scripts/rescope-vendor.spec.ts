@@ -61,8 +61,6 @@ describe('classified product identifiers', () => {
     'apps/cli/tests/optional-bundle-transitions.e2e.ts',
     'apps/web/tests/agent-preset-selection.e2e.ts',
     'apps/web/tests/developer-tools-settings.e2e.ts',
-    'docs/subsystems/schedule.md',
-    'docs/subsystems/schedule.zh.md',
     'docs/upgrade-guide/v0.2.0-rc.2/schedule-bundle-retired/guide.md',
     'docs/upgrade-guide/v0.2.0-rc.2/schedule-bundle-retired/guide.zh.md',
     'docs/upgrade-guide/v0.2.1-alpha.1/subagent-preset-composition/guide.md',
@@ -81,6 +79,16 @@ describe('classified product identifiers', () => {
       : file.endsWith('.yml') ? `# The \`${preset}\` preset.\n` : `const preset = '${preset}'\n`
     expect(rescopeText(source, file)).toEqual({ text: source, lines: 0 })
     expect(isRescopeExcluded(file)).toBe(false)
+  })
+
+  it.each(['docs/subsystems/schedule.md', 'docs/subsystems/schedule.zh.md'])('keeps package references eligible in %s', (file) => {
+    const text = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8')
+    expect(text).not.toMatch(/(['"`])cordis\1/)
+    expect(isRescopeExcluded(file)).toBe(false)
+    expect(rescopeText(text, file)).toEqual({ text, lines: 0 })
+    const source = `\`\`\`ts\nimport { Context } from '${preset}'\n\`\`\`\n`
+    const scoped = `\`\`\`ts\nimport { Context } from '@deepseek-ai/${preset}'\n\`\`\`\n`
+    expectRoundTrip(file, source, scoped, 1)
   })
 
   it.each([

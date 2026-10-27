@@ -163,6 +163,14 @@ export interface PiAiProviderProfile {
   defaultInput?: PiAiModality[]
   /** Provider request headers, validated against Fetch when the profile resolves; Harness attribution wins reserved names. */
   headers?: Record<string, string>
+  /**
+   * Codex subscription service tier: `default` requests Standard and `fast`
+   * requests Priority processing at higher subscription usage rates. Omission
+   * leaves the backend default unchanged. Only routes whose models all use
+   * `openai-codex-responses` accept this field; account eligibility is enforced
+   * by OpenAI, and a failed request is not retried at a different tier.
+   */
+  serviceTier?: 'default' | 'fast'
   /** Provider-neutral pi-ai reasoning level. */
   reasoning?: ModelThinkingLevel
   /** Token budgets used by reasoning providers that support them. */
@@ -203,7 +211,7 @@ export interface PiAiProviderProfile {
    * the smallest quality-ladder output is used when no quality fits.
    */
   requestImageMaxBytes?: number
-  /** Provider-owned model-request retry policy; omission uses normal mode with five retries. */
+  /** Provider-owned model-request retry policy; omission uses normal mode with 20 retries. */
   retryPolicy?: RetryPolicyConfig
 }
 
@@ -364,6 +372,7 @@ const profile = z.object({
   defaultMaxTokens: z.number().step(1).min(1).default(DEFAULT_MAX_TOKENS),
   defaultInput: z.array(z.union(MODALITIES)).default([...DEFAULT_INPUT]),
   headers: z.dict(z.string()),
+  serviceTier: z.union(['default', 'fast']),
   reasoning: z.union(THINKING_LEVELS),
   thinkingBudgets,
   cacheRetention: z.union(['none', 'short', 'long']),
@@ -514,6 +523,12 @@ export function resolveProfiles(
         defaultMaxTokens: source.defaultMaxTokens ?? DEFAULT_MAX_TOKENS,
       }, validation)
       catalogError = catalog.modelErrors.values().next().value
+      if (source.serviceTier !== undefined && catalog.models.some(model => model.api !== 'openai-codex-responses')) {
+        throw new PiAiCatalogError(
+          `llm-pi-ai: provider "${provider}" sets serviceTier, but its models do not all use openai-codex-responses;`
+          + ' remove serviceTier or configure it on the OpenAI Codex subscription route',
+        )
+      }
       piProvider = buildProvider({
         provider,
         displayName,

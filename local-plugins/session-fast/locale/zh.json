@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "会话 Fast 开关",
+    "description": "在推理等级下为每个 Codex 会话单独开启或关闭 Fast，保留订阅登录和思考强度。Fast 会消耗更多额度。"
+  }
+}

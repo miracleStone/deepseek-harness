@@ -2027,6 +2027,14 @@ export interface PiAiProviderProfile {
   defaultInput?: PiAiModality[]
   /** Provider request headers, validated against Fetch when the profile resolves; Harness attribution wins reserved names. */
   headers?: Record<string, string>
+  /**
+   * Codex subscription service tier: `default` requests Standard and `fast`
+   * requests Priority processing at higher subscription usage rates. Omission
+   * leaves the backend default unchanged. Only routes whose models all use
+   * `openai-codex-responses` accept this field; account eligibility is enforced
+   * by OpenAI, and a failed request is not retried at a different tier.
+   */
+  serviceTier?: 'default' | 'fast'
   /** Provider-neutral pi-ai reasoning level. */
   reasoning?: ModelThinkingLevel
   /** Token budgets used by reasoning providers that support them. */
@@ -2067,7 +2075,7 @@ export interface PiAiProviderProfile {
    * the smallest quality-ladder output is used when no quality fits.
    */
   requestImageMaxBytes?: number
-  /** Provider-owned model-request retry policy; omission uses normal mode with five retries. */
+  /** Provider-owned model-request retry policy; omission uses normal mode with 20 retries. */
   retryPolicy?: RetryPolicyConfig
 }
 
@@ -4961,6 +4969,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 | `@deepseek-ai/dsh-client-ui-sidebar-terminal` | — | [`packages/client/ui-sidebar-terminal/src/index.ts`](../packages/client/ui-sidebar-terminal/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-skill` | — | [`packages/client/ui-skill/src/index.ts`](../packages/client/ui-skill/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-subagent` | — | [`packages/client/ui-subagent/src/index.ts`](../packages/client/ui-subagent/src/index.ts) |
+| `@deepseek-ai/dsh-client-ui-subagent-model-info` | — | [`packages/client/ui-subagent-model-info/src/index.ts`](../packages/client/ui-subagent-model-info/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-tool` | — | [`packages/client/ui-tool/src/index.ts`](../packages/client/ui-tool/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-user-questions` | — | [`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-workflow-run` | — | [`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts) |

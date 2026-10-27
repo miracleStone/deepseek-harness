@@ -1,4 +1,4 @@
-/** Composer model selection injection and inline label extension. */
+/** Composer model selection injection and inline model extensions. */
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type { ModelSelection } from '@deepseek-ai/dsh-api-remotes/client'
 import type { ModelCatalogModel, ModelProviderGroup } from '@deepseek-ai/dsh-api-session-controller/types'
@@ -17,20 +17,48 @@ export interface ModelLabelOwner {
   selected: boolean
 }
 
+/** Exact selected model identity for additive, non-interactive trigger status content. */
+export interface ModelStatusOwner {
+  /** Selected provider route; contains no connection configuration. */
+  provider: ModelSelection['provider']
+  /** Selected model id within that provider. */
+  model: ModelSelection['model']
+}
+
+/** Current model identity and interaction state for root-menu option contributions. */
+export interface ModelOptionsOwner {
+  /** Selected provider route, or undefined before a selection; contains no connection configuration. */
+  provider: ModelSelection['provider'] | undefined
+  /** Selected model id within that provider, or undefined before a selection. */
+  model: ModelSelection['model'] | undefined
+  /** Whether the composer refuses changes, including while a model selection is pending. */
+  locked: boolean
+  /** Whether a model or reasoning selection is awaiting confirmation. */
+  busy: boolean
+  /** Close the menu and focus its trigger synchronously before opening another overlay. */
+  dismiss: () => void
+  /** Report a localized action failure through the menu owner's persistent toast. */
+  reportFailure: (message: string) => void
+}
+
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
-    /** Session options appended after model and reasoning controls in the root menu. */
+    /** Additive non-interactive inline status content after the trigger's reasoning effort. */
+    'conversation.input.model.status': {
+      kind: 'list'
+      scope: 'session'
+      inline: true
+      owner: ModelStatusOwner
+    }
+    /**
+     * Additive root-menu option rows after the reasoning control.
+     * Contributions use menuitem, menuitemradio, menuitemcheckbox, or switch buttons;
+     * disabled rows are excluded from the owner's keyboard navigation.
+     */
     'conversation.input.model.options': {
       kind: 'list'
       scope: 'session'
-      owner: {
-        /** Whether the composer currently refuses selection changes. */
-        locked: boolean
-        /** Close the menu and focus its trigger synchronously before opening another overlay. */
-        dismiss: () => void
-        /** Report a failed selection through the menu owner's persistent toast. */
-        reportFailure: (message: string) => void
-      }
+      owner: ModelOptionsOwner
     }
     /**
      * Non-interactive inline model label; selection controls remain owner-managed.

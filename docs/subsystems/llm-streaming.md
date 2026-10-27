@@ -307,7 +307,7 @@ Every adapter MUST obey these, and every consumer may rely on them:
 
 ## `ResolvedRetryPolicy`
 
-Retry configuration resolves before route registration into an immutable discriminated union. Normal mode carries `mode: 'normal'`, finite `maxRetries`, `retryableCodes`, and required `initialDelayMs`, `maxDelayMs`, and `jitterRatio`; always mode carries `mode: 'always'` and the same required backoff fields without a finite maximum. Omitting a provider policy uses the normal default of five retries. Layered settings may retain normal-only `maxRetries` or `retryableCodes` after switching to always mode; the resolver ignores those inactive fields and captures the pure always policy. `LlmRuntime.providerRetryPolicy(provider)` returns the registered value, and `llmRetryPolicyOf(stream)` returns the value captured from the serving registration after the call selects it, so later route disposal or replacement cannot change an in-flight failure's recovery policy. The [generated config catalog](../config-catalog.md) lists the optional input fields.
+Retry configuration resolves before route registration into an immutable discriminated union. Normal mode carries `mode: 'normal'`, finite `maxRetries`, `retryableCodes`, and required `initialDelayMs`, `maxDelayMs`, and `jitterRatio`; always mode carries `mode: 'always'` and the same required backoff fields without a finite maximum. Omitting a provider policy uses the normal default of 20 retries. Layered settings may retain normal-only `maxRetries` or `retryableCodes` after switching to always mode; the resolver ignores those inactive fields and captures the pure always policy. `LlmRuntime.providerRetryPolicy(provider)` returns the registered value, and `llmRetryPolicyOf(stream)` returns the value captured from the serving registration after the call selects it, so later route disposal or replacement cannot change an in-flight failure's recovery policy. The [generated config catalog](../config-catalog.md) lists the optional input fields.
 
 ## `AppIdentity` — app attribution
 
@@ -854,6 +854,10 @@ interface LlmCallConfigAdapterDefaults {
 }
 ```
 
+## Codex service-tier resolution
+
+`PiAiServiceTierRequest` carries `provider`, `model`, optional `sessionId`, and optional `defaultTier` (`default` or `fast`). The pi-ai adapter resolves this operational preference through `llm-pi-ai/service-tier` once at Codex request dispatch, before credential lookup; no message content or reasoning control is changed. Resolver failure prevents network I/O. The [pi-ai adapter reference](../../packages/llm/llm-pi-ai/README.md) owns tier selection and account limitations.
+
 ## Official DeepSeek request extensions
 
 `ctx.deepseekLlmApiExtensions` is the provider-specific registry for additive top-level fields on `deepseek-official` requests. Contributor plugins use `register(field, provider)` to claim one field; the adapter calls `prepare(request)` after serializing its base body and merges the returned fields before HTTP. The prepared `accept()` transaction runs after 2xx, so a contributor can commit delivery state without treating a transport or provider rejection as acceptance. A contributor whose preparation throws is logged and omitted from that request, and an acceptance failure is logged without failing the request; a base-field collision uses `REQUEST_EXTENSION` and fails the model request. A merged body that fails to serialize is sent without extension fields; acceptance is skipped and the provider plugin logs the omitted field names.
@@ -1278,6 +1282,25 @@ Prepare headers for one pi-ai inference call, excluding model discovery. Listene
  * @returns headers passed to pi-ai after Harness attribution is applied.
  */
 'llm-pi-ai/request-headers'(request: PiAiRequestHeaderContext, headers: Headers, next: () => Headers): Headers
+```
+
+Source: [`packages/llm/llm-pi-ai/src/index.ts`](../../packages/llm/llm-pi-ai/src/index.ts)
+
+<a id="llm-pi-aiservice-tier--waterfall"></a>
+
+#### `llm-pi-ai/service-tier` — waterfall
+
+Resolve one Codex request's service tier at dispatch without changing its model or reasoning controls. Listeners that do not own the request call next().
+
+```ts cordis-catalog
+/**
+ * Resolve one Codex request's service tier at dispatch without changing its
+ * model or reasoning controls. Listeners that do not own the request call next().
+ * @mode waterfall
+ * @param request - exact request identity and the captured provider preference.
+ * @param next - delegate to the next resolver, ending with the provider preference.
+ */
+'llm-pi-ai/service-tier'( request: PiAiServiceTierRequest, next: () => Promise<'default' | 'fast' | undefined>, ): Promise<'default' | 'fast' | undefined>
 ```
 
 Source: [`packages/llm/llm-pi-ai/src/index.ts`](../../packages/llm/llm-pi-ai/src/index.ts)

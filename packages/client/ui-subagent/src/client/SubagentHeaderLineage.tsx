@@ -42,6 +42,18 @@ export type SubagentCatalogActionInjected = SubagentCatalogInjected & {
 /** Full props for the session-header lineage renderer. */
 export type SubagentHeaderLineageProps =
   PropsRuntime<'conversation.session.header.lineage'> & InjectFace<SubagentCatalogInjected> & PropsLocale<typeof NS>
+  & PropsRenderSlots<'subagent.lineage.item.meta'>
+
+/** Each header entry renders only the metadata slot it declares. */
+type CatalogMeta =
+  | {
+    slot: 'subagent.lineage.item.meta'
+    renderSlot: PropsRenderSlots<'subagent.lineage.item.meta'>['renderSlot']
+  }
+  | {
+    slot: 'conversation.session.header.actions.subagent.item.meta'
+    renderSlot: SubagentCatalogActionProps['renderSlot']
+  }
 
 interface CatalogRowsProps {
   parentSessionId: SessionId
@@ -56,6 +68,7 @@ interface CatalogRowsProps {
   refreshProjection: (parentSessionId: SessionId) => void
   toggleBranch: (childSessionId: SessionId) => void
   closeCatalog: () => void
+  meta?: CatalogMeta | undefined
 }
 
 function treeItems(root: HTMLDivElement | null): HTMLElement[] {
@@ -242,7 +255,7 @@ function catalogProgress(entries: SubagentCatalogSnapshot['entries'], summaries:
 /** Render one catalog level and recurse only through explicitly expanded rows. */
 function CatalogRows({
   parentSessionId, currentSessionId, catalog, catalogs, summaries, expanded, level,
-  openChild, openChildAside, refreshProjection, toggleBranch, closeCatalog, t,
+  openChild, openChildAside, refreshProjection, toggleBranch, closeCatalog, meta, t,
 }: CatalogRowsProps & { t: TranslateNS<typeof NS> }) {
   const [now, setNow] = useState(() => Date.now())
   const running = catalog.entries.some(entry => entry.activity === 'running')
@@ -298,7 +311,16 @@ function CatalogRows({
           : completed
             ? t('activity.completed')
             : t('activity.inactive')
-        const secondary = [secondaryLabel, requiresOpening ? t('catalog.migrationRequired') : mode, activity]
+        const modelSelection = summary?.projectionValues?.modelSelection
+        const subagentMeta = summary?.projectionValues?.subagent
+        const selection = modelSelection?.lastUsed ?? modelSelection?.next
+        const descriptor = subagentMeta?.mode === 'continuable' ? subagentMeta : undefined
+        const model = selection?.model ?? descriptor?.model
+        const effort = selection == null ? descriptor?.reasoningEffort : selection.reasoningEffort
+        const modelText = model === undefined
+          ? (effort === undefined ? undefined : `(${effort})`)
+          : (effort === undefined ? model : `${model} (${effort})`)
+        const secondary = [secondaryLabel, modelText, requiresOpening ? t('catalog.migrationRequired') : mode, activity]
           .filter(value => value !== undefined)
           .join(' · ')
         const totalTokens = tokenTotal(summary?.projectionValues?.tokenUsage)
@@ -385,6 +407,11 @@ function CatalogRows({
                   {secondaryLabel !== undefined && (
                     <span className={css.secondaryLabel}>{secondaryLabel}</span>
                   )}
+                  <span className={css.summary}>
+                    {meta === undefined ? modelText : meta.slot === 'subagent.lineage.item.meta'
+                      ? meta.renderSlot(meta.slot, { childSessionId: entry.id }, { fallback: modelText ?? null })
+                      : meta.renderSlot(meta.slot, { childSessionId: entry.id }, { fallback: modelText ?? null })}
+                  </span>
                   {requiresOpening && <span className={css.summary}>{t('catalog.migrationRequired')}</span>}
                 </span>
                 {metrics !== '' && (
@@ -448,6 +475,7 @@ function CatalogRows({
                       refreshProjection={refreshProjection}
                       toggleBranch={toggleBranch}
                       closeCatalog={closeCatalog}
+                      meta={meta}
                       t={t}
                     />
                   )}
@@ -465,6 +493,7 @@ interface CatalogDropdownSharedProps extends InjectFace<SubagentCatalogInjected>
   rootSessionId: SessionId
   useSessions: SubagentHeaderLineageProps['useSessions']
   useSessionStatus: SubagentHeaderLineageProps['useSessionStatus']
+  meta?: CatalogMeta | undefined
   t: TranslateNS<typeof NS>
   /** Section labels are useful only beside a visible shared-task list. */
   hasSharedTasks?: boolean
@@ -497,7 +526,7 @@ type CatalogDropdownProps = CatalogDropdownSharedProps & (
 function CatalogDropdown(props: CatalogDropdownProps) {
   const {
     rootSessionId, currentSessionId, displayTitle, openTitle, variant,
-    useSessions, useSessionStatus, openChild, openChildAside, refreshProjection, t, hasSharedTasks = false,
+    useSessions, useSessionStatus, openChild, openChildAside, refreshProjection, meta, t, hasSharedTasks = false,
   } = props
   const ancestorSwitcher = variant === 'switcher' && openTitle !== undefined
   const projections = useSessions(state => state.projectionsBySession)
@@ -807,6 +836,7 @@ function CatalogDropdown(props: CatalogDropdownProps) {
                 refreshProjection={refreshProjection}
                 toggleBranch={toggleBranch}
                 closeCatalog={() => { changeOpen(false) }}
+                meta={meta}
                 t={t}
               />
             </div>
@@ -821,7 +851,7 @@ function CatalogDropdown(props: CatalogDropdownProps) {
 /** Full props for the root-session catalog entry in the header actions band. */
 export type SubagentCatalogActionProps =
   PropsRuntime<'conversation.session.header.actions'> & InjectFace<SubagentCatalogActionInjected> & PropsLocale<typeof NS>
-  & Omit<PropsRenderSlots<'conversation.session.header.actions.subagent.footer'>, 'SessionProvider'>
+  & Omit<PropsRenderSlots<'conversation.session.header.actions.subagent.footer' | 'conversation.session.header.actions.subagent.item.meta'>, 'SessionProvider'>
 
 /**
  * Session-header catalog action for root sessions: the descendant count and
@@ -855,6 +885,7 @@ function RootCatalogAction({
       hasSharedTasks={footerAvailable && hasSharedTasks}
       hasBoardContent={footerAvailable && (hasSharedTasks || hasTaskFailure)}
       renderFooter={() => renderSlot('conversation.session.header.actions.subagent.footer', {})}
+      meta={{ slot: 'conversation.session.header.actions.subagent.item.meta', renderSlot }}
       useSessions={useSessions}
       useSessionStatus={useSessionStatus}
       openChild={openChild}
@@ -871,7 +902,7 @@ function RootCatalogAction({
  * @returns A title-and-chevron sibling switcher, or nothing on a root session.
  */
 export function SubagentHeaderLineage({
-  lineageSessionId, displayTitle, openTitle,
+  lineageSessionId, displayTitle, openTitle, renderSlot,
   useSessions, useSession, useSessionStatus, openChild, openChildAside, refreshProjection, t,
 }: SubagentHeaderLineageProps) {
   const address = useSession(session => session.subagent?.address)
@@ -883,7 +914,8 @@ export function SubagentHeaderLineage({
     const summary = state.byId[lineageSessionId]
     return summary?.origin === 'subagent' ? summary.parentId : undefined
   })
-  const shared = { useSessions, useSessionStatus, openChild, openChildAside, refreshProjection, t }
+  const meta: CatalogMeta = { slot: 'subagent.lineage.item.meta', renderSlot }
+  const shared = { useSessions, useSessionStatus, openChild, openChildAside, refreshProjection, meta, t }
   // Root sessions carry no breadcrumb; their descendant count lives in the
   // header actions band (SubagentCatalogAction).
   if (parentId === undefined) return null

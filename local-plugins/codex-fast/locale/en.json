@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Codex Fast adapter",
+    "description": "Uses the existing ChatGPT sign-in to request Codex Fast processing. Keeps other pi-ai routes and reasoning settings; Fast uses more subscription quota."
+  }
+}

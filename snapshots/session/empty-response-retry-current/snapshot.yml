@@ -3,6 +3,7 @@ scenario: empty-response-retry-current
 profile: headless
 composition: retry
 recording: authored
+platform: posix
 header:
   class: retry
   pin: true

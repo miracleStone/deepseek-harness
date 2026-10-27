@@ -53,6 +53,14 @@ composer 菜单中的模型名称和推理等级均使用 400（regular）字重
 
 以 type-only 方式导入本包的 `/client` 声明，再通过 `ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({ name: 'conversation.input.model.label' }, ModelLabel))` 注册。`ModelLabel` 的 props 从 `PropsRuntime<'conversation.input.model.label'>` 派生；用提供方 ID 选择 CSS Module 类，并保留 `model.name` 作为文字。注册随声明和贡献插件的生命周期清理。不替换组件时，样式也可以在三个显示位置通过名称外层的 `data-provider-id` 和 `data-model-id` 属性定位。
 
+### 内联会话状态
+
+`conversation.input.model.status` 是触发按钮中推理强度之后、下拉箭头之前的会话作用域内联列表 slot，允许叠加多个扩展。仅在所选模型存在于显示目录中时渲染；owner props 提供当前选择的准确 `provider` 和 `model` ID。贡献方渲染非交互的内联内容，并负责自身会话状态，不替换 `conversation.input.model.label`。没有贡献时不添加内容。
+
+### 会话选项行
+
+`conversation.input.model.options` 是推理等级行下方的会话作用域列表 slot。owner props 提供已保存的提供方／模型 ID（选择前为 undefined）、`locked`、`busy`、`dismiss()` 和 `reportFailure(localizedMessage)`。`locked` 包括等待模型选择完成的状态。`dismiss()` 关闭菜单并同步聚焦触发按钮，供贡献方随后打开其他浮层；失败使用菜单 owner 的持久 toast。贡献方负责自身投影、命令及持久化。可用的 `menuitem`、`menuitemradio`、`menuitemcheckbox` 和 `switch` 按钮参与选择器的键盘导航；隐藏和禁用按钮会被跳过。
+
 ### 不可路由的会话
 
 目录可用性不会阻止使用已保存选择发送消息；请求执行负责报告凭据缺失或模型不可用。刷新及刷新失败期间保留上次显示的选择和分组。Host 重置时清空这些显示。退登后选择器隐藏账号提供方，同时保留已保存的提供方／模型 ID 和推理强度。再次登录且该模型可用时恢复目录名称。既有会话日志保持不变。
@@ -60,8 +68,6 @@ composer 菜单中的模型名称和推理等级均使用 400（regular）字重
 ### 选择失败
 
 当会话被其他写句柄占用时，模型选择失败提示用户退出其他正在运行的 DSH 后重试。
-
-会话级列表 slot `conversation.input.model.options` 在模型与推理等级选项下方追加控件。Owner props 提供 `locked`、`reportFailure(message)` 和 `dismiss()`，后者关闭菜单并同步聚焦触发按钮，供贡献方随后打开其他浮层；贡献方读取自身投影并提供专用命令。启用的开关按钮参与菜单键盘导航。
 
 -----
 

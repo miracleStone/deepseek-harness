@@ -418,8 +418,7 @@ describe('web e2e: live-turn interactions (cancel / error / retry)', () => {
     // A whole-script replacement: three throw entries cover the first request
     // plus both budgeted retries (patches cannot reach past the one-call
     // derived script). The scenario-owned policy keeps exhaustion fast and
-    // jitter-free instead of walking the shared default's five backed-off
-    // attempts.
+    // jitter-free instead of walking the shared default's backed-off retries.
     const failure: ReplayEntry = { kind: 'throw', chunks: [], message: 'upstream 503', code: 'SERVER' }
     const derived = deriveReplayScript(parseSessionLog(await readFile(FIXTURE, 'utf8')))
     await launch(

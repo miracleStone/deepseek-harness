@@ -26,6 +26,7 @@
  * @module dsh-llm-pi-ai/adapter
  */
 
+import type { OpenAICodexResponsesOptions } from '@earendil-works/pi-ai/api/openai-codex-responses'
 import type {
   Api,
   AuthContext,
@@ -82,7 +83,19 @@ interface PiAiSnapshot {
   models: Models
 }
 
-/** Constructor options for {@link PiAiAdapter}: the two resolution hooks the plugin owns. */
+/** Codex request identity used to resolve one request's operational service tier. */
+export interface PiAiServiceTierRequest {
+  /** Harness provider route. */
+  readonly provider: string
+  /** Exact model on the route. */
+  readonly model: string
+  /** Owning Session when the request belongs to one. */
+  readonly sessionId?: GenerateOptions['sessionId']
+  /** Provider profile preference; omission leaves the backend default unchanged. */
+  readonly defaultTier?: 'default' | 'fast'
+}
+
+/** Constructor options for the pi-ai adapter's request and credential resolution. */
 export interface PiAiAdapterOptions {
   /** Current validated profiles by provider route; called once per operation. */
   profiles: () => ReadonlyMap<string, ResolvedPiAiProviderProfile>
@@ -96,6 +109,13 @@ export interface PiAiAdapterOptions {
    * `MISSING_CREDENTIAL` rather than falling back.
    */
   resolveApiKey: (provider: string, profile: ResolvedPiAiProviderProfile) => Promise<string | undefined>
+  /**
+   * Resolve a Codex request's service tier once at dispatch, before credential
+   * resolution. Omission retains the profile tier. A returned `undefined`
+   * sends no tier preference; return `default` to override a Fast profile.
+   * Rejection fails the request without contacting the provider.
+   */
+  resolveServiceTier?: (request: PiAiServiceTierRequest) => Promise<'default' | 'fast' | undefined>
   /**
    * How every collection this adapter builds resolves auth the request-level
    * `apiKey` override does not cover. Required rather than optional: a
@@ -423,6 +443,14 @@ export class PiAiAdapter extends LlmAdapter {
       model,
       options.reasoningEffort ?? profile.reasoning,
     )
+    const serviceTier = model.api === 'openai-codex-responses' && this.config.resolveServiceTier !== undefined
+      ? await this.config.resolveServiceTier({
+        provider: options.provider,
+        model: options.model,
+        ...options.sessionId === undefined ? {} : { sessionId: options.sessionId },
+        ...profile.serviceTier === undefined ? {} : { defaultTier: profile.serviceTier },
+      })
+      : profile.serviceTier
     const apiKey = await this.config.resolveApiKey(options.provider, profile)
 
     const consumer = new AbortController()
@@ -457,14 +485,23 @@ export class PiAiAdapter extends LlmAdapter {
             maxBytes: profile.requestImageMaxBytes,
           },
         }, onReplayDegrade, updates.systemPromptUpdate === 'in-history')
-      const events = snapshot.models.streamSimple(model, context, {
+      const streamOptions = {
         ...profileOptions(profile, reasoning, apiKey),
         ...options.temperature === undefined ? {} : { temperature: options.temperature },
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
         signal: watchdog.signal,
         headers: requestHeaders(profile.headers, options, model.baseUrl, this.config.prepareHeaders),
-      })
+      }
+      // pi-ai's simple options omit serviceTier. Native Codex options preserve
+      // both the wire tier and the SDK's requested-tier usage accounting.
+      const events = serviceTier === undefined
+        ? snapshot.models.streamSimple(model, context, streamOptions)
+        : snapshot.models.stream(model, context, {
+          ...streamOptions,
+          ...reasoning === undefined || reasoning === 'off' ? {} : { reasoningEffort: reasoning },
+          serviceTier: serviceTier === 'fast' ? 'priority' : 'default',
+        } satisfies OpenAICodexResponsesOptions)
       const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id)[Symbol.asyncIterator]()
       let exhausted = false
       try {

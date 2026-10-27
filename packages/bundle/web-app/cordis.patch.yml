@@ -396,6 +396,9 @@
     - id: ui-subagent
       name: '@deepseek-ai/dsh-client-ui-subagent'
 
+    - id: ui-subagent-model-info
+      name: '@deepseek-ai/dsh-client-ui-subagent-model-info'
+
     - id: ui-reference
       name: '@deepseek-ai/dsh-client-ui-reference'
 

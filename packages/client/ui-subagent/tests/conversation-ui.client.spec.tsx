@@ -9,6 +9,7 @@ import type {
 import type { SubagentAddress, SubagentCatalogEntry } from '@deepseek-ai/dsh-subagent/client'
 import type { TeamProjection, TeamTaskId, TeamTaskView } from '@deepseek-ai/dsh-agent-team/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm/brand'
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import {
   SubagentCatalogAction, SubagentHeaderLineage,
@@ -113,6 +114,7 @@ function props(
     useSessionRetainInfo: unused,
     useWorkspaces: unused,
     useResource: unused,
+    SessionProvider: (({ children }) => children) satisfies SubagentHeaderLineageProps['SessionProvider'],
     ...allowAllAccess,
     useContextMenu: contextMenuHook(),
     useProjection: unused,
@@ -142,9 +144,9 @@ function props(
     openChild: vi.fn(),
     openChildAside: vi.fn(),
     refreshProjection: vi.fn(),
-    renderSlot: vi.fn(() => null),
     lineageSessionId: PARENT,
     displayTitle: 'Parent title',
+    renderSlot: vi.fn((...args: Parameters<HeaderCatalogProps['renderSlot']>) => args[2]?.fallback ?? null),
     t,
   } satisfies HeaderCatalogProps
 }
@@ -545,6 +547,66 @@ describe('SubagentHeaderLineage', () => {
       parentSessionId: PARENT,
       childSessionId: CHILD, mode: 'continuable',
     })
+  })
+
+  it('displays subagent model and reasoning effort when available in projection values', () => {
+    const input = props(catalog({
+      entries: [{
+        id: CHILD, mode: 'continuable', label: 'worker', activity: 'running',
+      }],
+    }), {}, {
+      [CHILD]: {
+        ...summary(CHILD, 1),
+        parentId: PARENT,
+        origin: 'subagent',
+        running: true,
+        projectionValues: {
+          modelSelection: {
+            lastUsed: { provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: ReasoningEffortId('high') },
+            next: null,
+          },
+        },
+      },
+    })
+    render(<HeaderCatalog {...input} />)
+    const trigger = screen.getByRole('button', { name: '1 个子智能体' })
+    hoverCatalog(trigger)
+    expect(screen.getByText('deepseek-chat (high)')).toBeTruthy()
+    expect(screen.getByRole('treeitem', { name: /worker.*deepseek-chat \(high\).*可继续.*正在运行/ })).toBeTruthy()
+  })
+
+  it.each([true, false].flatMap(contributed => ['root', 'lineage'].map(entry => ({ contributed, entry }))))(
+    'shows model metadata once in $entry with a contribution or its fallback ($contributed)', ({ contributed, entry }) => {
+    const input = props(catalog({
+      entries: [{ id: CHILD, mode: 'continuable', label: 'worker', activity: 'inactive' }],
+    }), {}, {
+      [CHILD]: {
+        ...summary(CHILD, 1), parentId: PARENT, origin: 'subagent',
+        projectionValues: { modelSelection: {
+          lastUsed: { provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: ReasoningEffortId('high') },
+          next: null,
+        } },
+      },
+    })
+    const headerProps: HeaderCatalogProps = {
+      ...input,
+      lineageSessionId: entry === 'lineage' ? CHILD : PARENT,
+      displayTitle: 'worker',
+      renderSlot: (name, owner, options) => {
+        if (name === 'conversation.session.header.actions.subagent.footer') return <span>Task footer</span>
+        expect(name).toBe(entry === 'lineage' ? 'subagent.lineage.item.meta' : 'conversation.session.header.actions.subagent.item.meta')
+        if (!contributed) return options?.fallback ?? null
+        expect(owner).toEqual({ childSessionId: CHILD })
+        return <span>deepseek-chat (high)</span>
+      },
+    }
+    render(<HeaderCatalog {...headerProps} />)
+    hoverCatalog(screen.getByRole('button', { name: entry === 'lineage' ? '切换子智能体：worker' : '1 个子智能体' }))
+    expect(screen.queryByText('Task footer') !== null).toBe(entry === 'root')
+    const row = screen.getByRole('treeitem', { name: /worker.*deepseek-chat/ })
+    expect(row.textContent?.match(/deepseek-chat/g)).toHaveLength(1)
+    expect(row.textContent).toContain('deepseek-chat (high)')
+    expect(row.getAttribute('aria-label')?.match(/deepseek-chat/g)).toHaveLength(1)
   })
 
   it('selects singular count keys for one direct child', () => {

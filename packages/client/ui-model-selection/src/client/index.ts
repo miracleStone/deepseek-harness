@@ -33,7 +33,7 @@ import { orderModelProviders } from './provider-order.ts'
 export { ModelDirectory } from './directory.ts'
 export type { ModelDirectoryState } from './directory.ts'
 export { ModelDirectoryResolver } from './service.ts'
-export type { ModelLabelOwner, ModelSelectInjected } from './slots.ts'
+export type { ModelLabelOwner, ModelOptionsOwner, ModelStatusOwner, ModelSelectInjected } from './slots.ts'
 export type { ModelKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -174,6 +174,7 @@ export function apply(ctx: ClientContext): void {
       locale: NS,
       children: {
         'conversation.input.model.label': { kind: 'single', scope: 'session', inline: true },
+        'conversation.input.model.status': { kind: 'list', scope: 'session', inline: true },
         'conversation.input.model.options': { kind: 'list', scope: 'session' },
       },
       inject: (sessionId): ModelSelectInjected => {

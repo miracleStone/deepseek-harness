@@ -1475,8 +1475,12 @@ describe('headless recorded-session snapshots', () => {
               expect(events.filter(event => event.type === 'assistant/attempt' || event.type === 'llm/retry'
                 || event.type === 'llm/retry-started' || event.type === 'assistant/message')
                 .map(event => event.type)).toEqual([
-                'assistant/attempt', 'llm/retry', 'llm/retry-started', 'assistant/message',
+                ...Array.from({ length: 6 }, () => ['assistant/attempt', 'llm/retry', 'llm/retry-started']).flat(),
+                'assistant/message',
               ])
+              expect(events.flatMap(event => event.type === 'llm/retry'
+                ? [{ retry: event.data.retry, maxRetries: event.data.mode === 'normal' ? event.data.maxRetries : undefined }]
+                : [])).toEqual(Array.from({ length: 6 }, (_, index) => ({ retry: index + 1, maxRetries: 20 })))
             }
             if (retainedToolInput !== undefined && primaryFixture !== undefined) {
               verifyToolResultWriterParity(primaryFixture, actualLogs[0]!.content)

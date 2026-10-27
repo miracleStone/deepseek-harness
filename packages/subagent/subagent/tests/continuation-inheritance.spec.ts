@@ -100,10 +100,9 @@ describe('continuable policy inheritance', () => {
     const loaded = await loadStoredSession(ctx.sessionPersistence, started.childId)
     expect(ctx.sandboxPolicy.additionalRootsOf(Session.create(started.childId, loaded.events))).toEqual([original])
     expect(ctx.sandboxPolicy.additionalRootsOf(parent.session)).toEqual([later])
-    await queueHostSubagentPrompt(
-      ctx.subagents, parent, started.childId,
-      [{ type: 'text', text: 'continue' }], { kind: 'user' }, new AbortController().signal,
-    )
+    await subagentManager(ctx).deliverPrompt(started.childId, [{ type: 'text', text: 'continue' }], {
+      delivery: 'queue', source: { kind: 'user' }, signal: new AbortController().signal,
+    })
     await waitNoActivation(ctx, started.childId)
     const resumed = await loadStoredSession(ctx.sessionPersistence, started.childId)
     expect(ctx.sandboxPolicy.additionalRootsOf(Session.create(started.childId, resumed.events))).toEqual([original])

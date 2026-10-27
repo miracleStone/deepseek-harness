@@ -1,8 +1,8 @@
 /**
  * ModelSelect: the composer's named model seat (`conversation.input.model`).
- * Two-level selection per figma 496:26454's MenuDropdown: the root menu is
- * the Model / Effort row pair (label + current value + a right chevron),
- * each drilling into its own list — the provider-grouped model list over
+ * Two-level selection per figma 496:26454's MenuDropdown: the root menu starts
+ * with Model / Effort rows (label + current value + a right chevron), followed
+ * by extension-owned options. The built-in rows drill into their own lists — the provider-grouped model list over
  * the shared directory, and the effort levels. The trigger (313:14108's
  * ToggleButton) shows both: model name + effort in the caption tone.
  * Model catalogs above four entries show search, which retains focus while
@@ -29,7 +29,7 @@
  */
 import { MenuGroup, MenuSurface, observeStickyMenuGroups } from '@deepseek-ai/dsh-client-ui-primitives'
 import {
-  useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
+  useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
   type CSSProperties, type KeyboardEvent, type FocusEvent,
 } from 'react'
 import { createPortal } from 'react-dom'
@@ -44,7 +44,7 @@ import type { ModelLabelOwner, ModelSelectInjected } from './slots.ts'
 import css from './ModelSelect.module.css'
 import { orderModelProviders } from './provider-order.ts'
 
-/** Which pane the dropdown shows: the two-row root or one drilled-in list. */
+/** Which pane the dropdown shows: root controls or one drilled-in list. */
 type Pane = 'root' | 'model' | 'effort'
 
 /** One dynamic effort row; undefined means preserve the provider default. */
@@ -52,6 +52,13 @@ interface EffortChoice {
   key: string
   effort: string | undefined
   label: string
+}
+
+/** Read enabled menu buttons in rendered order, including extension-owned rows. */
+function menuItems(menu: HTMLElement | null): HTMLButtonElement[] {
+  return Array.from(menu?.querySelectorAll<HTMLButtonElement>(
+    'button[role="menuitem"], button[role="menuitemradio"], button[role="menuitemcheckbox"], button[role="switch"]',
+  ) ?? []).filter(item => !item.disabled && item.getAttribute('aria-disabled') !== 'true' && item.closest('[hidden]') === null)
 }
 
 /**
@@ -63,7 +70,7 @@ interface EffortChoice {
 export function ModelSelect(
   { locked, available, directory, load, select, resolveText, t, renderSlot }:
   ModelSelectInjected & Pick<PropsRuntime<'conversation.input.model'>, 'locked'> & PropsLocale<'model'>
-    & Omit<PropsRenderSlots<'conversation.input.model.label' | 'conversation.input.model.options'>, 'SessionProvider'>,
+    & Omit<PropsRenderSlots<'conversation.input.model.label' | 'conversation.input.model.status' | 'conversation.input.model.options'>, 'SessionProvider'>,
 ) {
   const state = useSyncExternalStore(
     fn => directory.subscribe(fn),
@@ -149,6 +156,19 @@ export function ModelSelect(
     ], [reasoning, t])
   const { pending } = state
   const busy = pending !== null
+  const close = useCallback((restoreFocus = false): void => {
+    setOpen(false)
+    setPane('root')
+    if (restoreFocus) queueMicrotask(() => { triggerRef.current?.focus() })
+  }, [])
+  const dismissOptions = useCallback(() => {
+    close()
+    triggerRef.current?.focus()
+  }, [close])
+  const reportOptionError = useCallback((text: string): void => {
+    toastSeq.current += 1
+    setToast({ seq: toastSeq.current, text })
+  }, [])
 
   const reload = (): void => {
     lastActionRef.current = 'load'
@@ -232,12 +252,6 @@ export function ModelSelect(
     setHighlightedIndex(0)
   }
 
-  const close = (restoreFocus = false): void => {
-    setOpen(false)
-    setPane('root')
-    if (restoreFocus) queueMicrotask(() => { triggerRef.current?.focus() })
-  }
-
   const closeAfterSelection = (): void => {
     setSelectionFocus(true)
     close(true)
@@ -257,9 +271,7 @@ export function ModelSelect(
   }
 
   const moveFocus = (offset: number): void => {
-    const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>(
-      'button[role="menuitem"]:not([disabled]), button[role="menuitemradio"]:not([disabled]), button[role="switch"]:not([disabled])',
-    ) ?? [])
+    const items = menuItems(menuRef.current)
     if (items.length === 0) return
     const active = items.findIndex(item => item === document.activeElement)
     // Focus outside the rows (the trigger, which keeps it while the menu
@@ -313,9 +325,7 @@ export function ModelSelect(
       // control inside the card (a retry button) keeps the browser's traversal,
       // so the keystroke stays unconsumed there.
       const focused = document.activeElement
-      const rows = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>(
-        'button[role="menuitem"]:not([disabled]), button[role="menuitemradio"]:not([disabled]), button[role="switch"]:not([disabled])',
-      ) ?? [])
+      const rows = menuItems(menuRef.current)
       if (focused instanceof HTMLButtonElement && rows.includes(focused)) {
         event.preventDefault()
         focused.click()
@@ -468,6 +478,10 @@ export function ModelSelect(
           {currentChoice === undefined ? modelLabel : renderModelLabel(currentChoice.group.provider, currentChoice.model, 'trigger', true)}
         </span>
         {effortLabel !== undefined && <span className={css.triggerEffort}>{effortLabel}</span>}
+        {currentChoice !== undefined && renderSlot('conversation.input.model.status', {
+          provider: currentChoice.selection.provider,
+          model: currentChoice.selection.model,
+        })}
         {busy
           ? <StateDot state="ongoing" />
           : <IconChevronDownOutlineRegular className={clsx(css.chevron, open && css.chevronOpen)} />}
@@ -503,12 +517,12 @@ export function ModelSelect(
                 </button>
               )}
               {renderSlot('conversation.input.model.options', {
+                provider: state.current?.provider,
+                model: state.current?.model,
                 locked: locked || busy,
-                dismiss: () => {
-                  close()
-                  triggerRef.current?.focus()
-                },
-                reportFailure: (message) => { setToast({ seq: ++toastSeq.current, text: message }) },
+                busy,
+                dismiss: dismissOptions,
+                reportFailure: reportOptionError,
               })}
             </>
           )}

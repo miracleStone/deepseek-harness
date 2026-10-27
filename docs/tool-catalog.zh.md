@@ -2095,7 +2095,7 @@ subagent_oar 工具在为外部提供方配置的别名之间选择。本目录�
     },
     "reasoning_effort": {
       "type": "string",
-      "description": "Model-specific reasoning effort id."
+      "description": "Adapter-owned reasoning effort for the effective child route. Omit to inherit a compatible configured/parent effort or use a newly selected model's default."
     }
   },
   "required": [

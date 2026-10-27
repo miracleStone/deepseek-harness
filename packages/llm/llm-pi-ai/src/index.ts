@@ -65,6 +65,7 @@ import type { AdapterRegistrationHandle, DirectoryRegistrationHandle, LlmConfigu
 import type {} from '@deepseek-ai/dsh-fs'
 import { deepEqualJson } from '@deepseek-ai/dsh-util-values'
 import { PiAiAdapter } from './adapter.ts'
+import type { PiAiServiceTierRequest } from './adapter.ts'
 import { authContextFrom, credentialStoreFrom } from './auth.ts'
 import { catalogProvider, catalogProviderIds } from './catalog.ts'
 import { assertServiceable, Config, resolveProfiles } from './config.ts'
@@ -76,8 +77,24 @@ import { providerDefaultsOf } from './provider-data.ts'
 import type { PiAiRequestHeaderContext } from './types.ts'
 
 export { PiAiAdapter } from './adapter.ts'
-export type { PiAiAdapterOptions } from './adapter.ts'
+export type { PiAiAdapterOptions, PiAiServiceTierRequest } from './adapter.ts'
 export type { PiAiRequestHeaderContext } from './types.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * Resolve one Codex request's service tier at dispatch without changing its
+     * model or reasoning controls. Listeners that do not own the request call next().
+     * @mode waterfall
+     * @param request - exact request identity and the captured provider preference.
+     * @param next - delegate to the next resolver, ending with the provider preference.
+     */
+    'llm-pi-ai/service-tier'(
+      request: PiAiServiceTierRequest,
+      next: () => Promise<'default' | 'fast' | undefined>,
+    ): Promise<'default' | 'fast' | undefined>
+  }
+}
 export { Config } from './config.ts'
 export type {
   Options,
@@ -238,6 +255,9 @@ export function apply(ctx: Context, config: Config): void {
   const adapter = new PiAiAdapter({
     profiles,
     resolveApiKey,
+    resolveServiceTier: request => ctx.waterfall(
+      'llm-pi-ai/service-tier', request, () => Promise.resolve(request.defaultTier),
+    ),
     auth,
     prepareHeaders: (request, headers) => ctx.waterfall('llm-pi-ai/request-headers', request, headers, () => headers),
     resolveAttachments: () => ctx.get('attachments'),

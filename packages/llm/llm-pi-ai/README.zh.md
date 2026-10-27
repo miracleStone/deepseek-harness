@@ -35,7 +35,7 @@ kind: "package-reference"
 
 ### 配置提供方路由
 
-每个 profile 都可以设置 `retryPolicy`；省略时使用 normal mode、最多重试五次。`apiKeyEnv` 是按请求经 harness 凭据 seam 解析的凭据引用，因此配置文件绝不包含密钥；解析为空的引用会让请求以 `MISSING_CREDENTIAL` 失败。省略它会让路由保持已配置但无密钥（configured-but-keyless）状态，对已安装目录路由而言即交由 pi-ai 提供方原生的环境发现。
+每个 profile 都可以设置 `retryPolicy`；省略时使用 normal mode、最多重试 20 次。`apiKeyEnv` 是按请求经 harness 凭据 seam 解析的凭据引用，因此配置文件绝不包含密钥；解析为空的引用会让请求以 `MISSING_CREDENTIAL` 失败。省略它会让路由保持已配置但无密钥（configured-but-keyless）状态，对已安装目录路由而言即交由 pi-ai 提供方原生的环境发现。
 
 ```yaml
 - name: '@deepseek-ai/dsh-llm-pi-ai'
@@ -90,7 +90,7 @@ kind: "package-reference"
 | `maxRequestImageBytes` | `20 MiB` | base64 图片载荷总上限，保留图片超过时请求以 `IMAGE_OFFLOAD_REQUIRED` 失败 |
 | `maxRequestImages` | `50` | 保留请求图片数量上限，保留图片超过时请求以 `IMAGE_OFFLOAD_REQUIRED` 失败。默认值取 Azure OpenAI 的 50 张上限；提供方接受更多图片的路由应调高 |
 | `imageOffloadCountQuantum` | `10`，不超过 `maxRequestImages` | 每次数量超限时省略的最老图片数 |
-| `retryPolicy` | normal，5 次重试 | 由 `dsh-llm-retry` 执行的提供方自有重试策略 |
+| `retryPolicy` | normal，20 次重试 | 由 `dsh-llm-retry` 执行的提供方自有重试策略 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-llm-pi-ai)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
@@ -109,6 +109,14 @@ profile 的 `models` 列表会替换而非扩展路由的已安装目录；每�
 确切模型元数据将 `reasoning.efforts` 按可选强度从低到高排列。配置函数可从该列表中选择，再由 `prepareCall()` 校验具体强度。适配器只接收解析后的控制项。选择 `off` 不保证禁用推理：以省略推理字段表达该值的协议会沿用网关默认行为。所选等级下产生的推理 token 都计入该请求的输出上限。
 
 对于自托管 Chat Completions 端点，`thinkingTokenBudgetField` 选择推理预算参数，`vllmPriority` 在服务端启用优先级调度时设置整数调度优先级。模板参数接受 `$var: thinking.budget`。`openai-responses` 网关可设置 `supportsMaxOutputTokens: false` 来省略 `max_output_tokens`；Azure 与 Codex 传输会忽略这个共享兼容字段。这些控制均需显式启用；目录拥有的 Anthropic effort 和回退能力不是可配置开关。
+
+### 选择 Codex 标准或 Fast 处理档位
+
+将 `providers.openai-codex.serviceTier` 设为 `fast`，即可用现有 ChatGPT 订阅登录请求 Fast 处理；设为 `default` 则请求标准处理。省略时不发送档位偏好。只有全部模型均使用 `openai-codex-responses` 的路由接受此字段；使用 API Key 的 OpenAI 路由及其他协议会拒绝它。Fast 映射为协议值 `service_tier: priority`，不会降低 `reasoning` 或更换所选模型。
+
+Fast 会以更高倍率消耗订阅额度；可用性与计费以 [OpenAI 速度指南](https://learn.chatgpt.com/docs/agent-configuration/speed.md)为准。OpenAI 决定账号和模型能否使用所请求的档位。提供方错误仍作为失败返回，不切换档位；本地 SDK 成本估算不能确认优先处理已获分配，也不能衡量剩余订阅额度。
+
+`llm-pi-ai/service-tier` waterfall 根据每个 Codex 请求的提供方、模型、可选会话 id 和已捕获的 profile 偏好解析处理档位。未被处理的请求保留该偏好。会话级解析器返回 `default` 即可关闭 Fast profile 的加速；返回 `undefined` 则不发送档位偏好。解析在请求分派时、凭据查找前执行一次，之后的偏好更改不会影响该已分派请求。其他协议不调用此解析器；解析失败会在网络 I/O 前终止请求。
 
 ### 运行时更改配置
 

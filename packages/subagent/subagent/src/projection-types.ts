@@ -85,6 +85,10 @@ export type SubagentIdentityProjection =
     mode: 'continuable'
     /** Durable creation label from the child's descriptor. */
     label: string
+    /** Optional child model from the descriptor. */
+    model?: string
+    /** Optional child reasoning effort from the descriptor. */
+    reasoningEffort?: string
     /** Seq of the folded descriptor event; see the one-shot arm for the own-suffix proof. */
     seq: SessionSeq
   }
