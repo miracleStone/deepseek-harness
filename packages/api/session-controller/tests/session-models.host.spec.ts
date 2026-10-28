@@ -428,6 +428,18 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('exposes remembered reasoning efforts on catalog models', async () => {
+    const { ctx } = await harness()
+    const remote = await createSessionTestRemote(ctx, {
+      defaultModelSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: ReasoningEffortId('max') }),
+      cwd: '/tmp',
+    })
+    const catalog = expectValue(await remote.modelCatalog())
+    const chat = catalog.groups[0]?.models.find(m => m.id === 'deepseek-chat')
+    expect(chat?.selectedEffort).toBe('max')
+    await ctx.fiber.dispose()
+  })
+
   it('preserves optional catalog metadata and string provider failures', async () => {
     const { ctx } = await harness()
     ctx.llm.registerAdapter(['plain'], new CatalogAdapter('Plain', [

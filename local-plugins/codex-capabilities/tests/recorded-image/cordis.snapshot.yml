@@ -1,0 +1,52 @@
+# Unrelated platform tools and skill catalogs stay out of this recording.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-skill
+  disabled: true
+- id: credentials
+  disabled: false
+- id: llm-deepseek
+  disabled: true
+- id: session-title-llm
+  disabled: true
+- id: sandbox-policy
+  config:
+    mode: danger-full-access
+    workspaceRoot: !!js process.cwd()
+- id: approval
+  config:
+    policy: never
+- id: session-persistence-jsonl
+  config:
+    root: !!js dshHomePath('sessions')
+    compression: none
+- id: session-log-deepseek
+  config:
+    enabled: false
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-flash-vision-exp
+- id: web
+  config:
+    searchProvider: codex-subscription
+- insert:
+    - id: attachment-local
+      name: '@deepseek-ai/dsh-attachment-local'
+    - id: codex-replay-credentials
+      name: ./seed-credentials.js
+    - id: codex-capabilities
+      name: ../../index.js
+      config:
+        baseURL: !!js process.env.CODEX_REPLAY_BASE_URL
+    - id: llm-replay
+      name: '@deepseek-ai/dsh-llm-replay'
+      config:
+        providers:
+          - id: deepseek-official
+            name: DeepSeek
+            models:
+              - id: deepseek-v4-flash-vision-exp
+                inputModalities: [text, image]

@@ -252,11 +252,16 @@ async function installControllers(
     } as never)
   }
   if (ctx.get('agentDefaultModel') === undefined) {
+    const rememberedEfforts = new Map<string, string>()
     ctx.provide('agentDefaultModel', {
       currentSelection: defaults.defaultModelSelection,
       saveSelection: async (selection: AgentModelSelection) => {
+        const key = `${selection.provider}/${selection.model}`
+        if (selection.reasoningEffort === undefined) rememberedEfforts.delete(key)
+        else rememberedEfforts.set(key, selection.reasoningEffort)
         await defaults.saveDefaultModelSelection?.(selection)
       },
+      effortForModel: (provider: string, model: string) => rememberedEfforts.get(`${provider}/${model}`),
     } as never)
   }
   if (ctx.get('llm') === undefined) {

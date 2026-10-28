@@ -39,12 +39,21 @@ export async function buildModelCatalog(
               ? {}
               : { defaultEffort: resolved.reasoning.defaultEffort }),
           }
+        const candidateEffort = ctx.get('agentDefaultModel')?.effortForModel?.(provider.id, model.id)
+          ?? (provider.id === defaultSelection.provider && model.id === defaultSelection.model
+            ? defaultSelection.reasoningEffort
+            : undefined)
+        const selectedEffort = reasoning !== undefined && candidateEffort !== undefined
+          && reasoning.efforts.some(effort => effort.id === candidateEffort)
+          ? candidateEffort
+          : undefined
         return {
           id: model.id,
           name: model.name,
           ...(model.description === undefined ? {} : { description: model.description }),
           ...(reasoning === undefined ? {} : { reasoning }),
           ...(model.badge === undefined ? {} : { badge: model.badge }),
+          ...(selectedEffort === undefined ? {} : { selectedEffort }),
         }
       }))
       return {

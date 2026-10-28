@@ -28,6 +28,8 @@ export interface Config {
   model: Volatile<string>
   /** Adapter-owned reasoning effort; omission follows the provider default. */
   reasoningEffort: Volatile<string | undefined>
+  /** Remembered reasoning effort per model route, keyed by `${provider}/${model}`. */
+  efforts?: Volatile<Record<string, string | undefined>>
 }
 
 /** Project stored settings onto the Agent-facing selection type. */
@@ -52,6 +54,7 @@ export class AgentDefaultModelConfig extends Service {
     provider: z.string().required().volatile(),
     model: z.string().required().volatile(),
     reasoningEffort: z.string().volatile(),
+    efforts: z.dict(z.string()).default({}).volatile(),
   })
 
   constructor(private readonly ownerContext: Context, private config: Config) {
@@ -65,11 +68,30 @@ export class AgentDefaultModelConfig extends Service {
    * @returns a detached provider, model, and optional reasoning selection.
    */
   currentSelection(): ModelSelection {
-    const reasoningEffort = this.config.reasoningEffort.get()
+    const provider = this.config.provider.get()
+    const model = this.config.model.get()
+    const reasoningEffort = this.config.reasoningEffort?.get()
+      ?? this.effortForModel(provider, model)
     return selection({
-      provider: this.config.provider.get(), model: this.config.model.get(),
+      provider, model,
       ...reasoningEffort === undefined ? {} : { reasoningEffort },
     })
+  }
+
+  /**
+   * Read the remembered reasoning effort for an exact model route.
+   * @param provider - registered provider route.
+   * @param model - provider-owned model id.
+   * @returns the remembered reasoning effort, or undefined when none was selected.
+   */
+  effortForModel(provider: string, model: string): string | undefined {
+    const stored = this.config.efforts?.get()?.[`${provider}/${model}`]
+    if (stored !== undefined && stored.length > 0) return stored
+    if (provider === this.config.provider?.get() && model === this.config.model?.get()) {
+      const defaultEffort = this.config.reasoningEffort?.get()
+      if (defaultEffort !== undefined && defaultEffort.length > 0) return defaultEffort
+    }
+    return undefined
   }
 
   /**
@@ -84,9 +106,17 @@ export class AgentDefaultModelConfig extends Service {
     if (entry === undefined) return
     const editor = this.ctx.get('configEditor')
     if (editor === undefined) return
+    const key = `${next.provider}/${next.model}`
+    const previousEfforts = Object.fromEntries(
+      Object.entries(this.config.efforts?.get() ?? {}).filter(([route]) => route !== key),
+    )
+    if (next.reasoningEffort !== undefined) {
+      previousEfforts[key] = String(next.reasoningEffort)
+    }
     const config = {
       provider: next.provider, model: next.model,
       ...next.reasoningEffort === undefined ? {} : { reasoningEffort: String(next.reasoningEffort) },
+      efforts: previousEfforts,
     }
     const saved = this.saves.then(() => editor.edit(entry, () => config))
     this.saves = saved.catch(() => {})

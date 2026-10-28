@@ -1,0 +1,76 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`subscription images > uses JSON generation with OAuth headers and stores verbatim original before preview 1`] = `
+[
+  {
+    "text": "Generated image with gpt-image-2.5-flare; requested size: 1024x1024. Preview: 1x1. Original PNG saved on the host at "C:\\\\attachments\\\\original". Copy it with a .png extension; leave the stored original in place.",
+    "type": "text",
+  },
+  {
+    "attachment": {
+      "attachmentId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "bytes": 90,
+      "height": 1,
+      "mediaType": "image/png",
+      "name": "preview.png",
+      "width": 1,
+    },
+    "type": "image",
+  },
+]
+`;
+
+exports[`subscription images > uses JSON generation with OAuth headers and stores verbatim original before preview 2`] = `"Generate or edit an image using the signed-in Codex subscription only when the user requests image output. For a new image omit referenceImages. For an edit, supply complete attachment IDs copied from selected session image blocks or read_image results. Never replace an invalid edit with a new generation. The result includes a preview and the original PNG host path when available; copy, do not move, the original if saving to the workspace. Do not silently retry a failed request or switch models: requests can consume subscription quota."`;
+
+exports[`subscription images > uses JSON generation with OAuth headers and stores verbatim original before preview 3`] = `
+{
+  "properties": {
+    "background": {
+      "enum": [
+        "auto",
+        "transparent",
+        "opaque",
+      ],
+      "type": "string",
+    },
+    "model": {
+      "description": "Optional image engine, independent of the chat model. Defaults to gpt-image-2.5-flare when omitted. Honor the user's explicit model choice. Choose gpt-image-2.5-flare for fast everyday generation, quick drafts, and iterative concept exploration. Choose gpt-image-2.5-sunburst for quality-critical or complex generation and precise edits where preserving subject identity or product details matters more than speed. Both engines support generation and editing; do not choose solely by artistic style or the presence of reference images. Select before the first request; never silently retry or switch engines after a failure. Do not promise a fixed speedup, lower subscription usage, or perfect detail preservation. Account availability can vary.",
+      "enum": [
+        "gpt-image-2.5-flare",
+        "gpt-image-2.5-sunburst",
+      ],
+      "type": "string",
+    },
+    "prompt": {
+      "description": "Complete description of the requested image or edits.",
+      "type": "string",
+    },
+    "quality": {
+      "enum": [
+        "auto",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+      ],
+      "type": "string",
+    },
+    "referenceImages": {
+      "description": "1–5 complete sha256: attachment IDs from this session. Omit for a new image.",
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+    "size": {
+      "description": "auto or exact widthxheight; use auto unless the user requests dimensions.",
+      "type": "string",
+    },
+  },
+  "required": [
+    "prompt",
+  ],
+  "type": "object",
+}
+`;

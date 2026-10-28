@@ -88,8 +88,8 @@ function selectionOf(state: ModelDirectoryState, id: string): ModelSelection | u
       if (rowId(group.id, model.id) !== id) continue
       const sameRoute = state.current?.provider === group.id && state.current.model === model.id
       const reasoningEffort = sameRoute
-        ? state.current?.reasoningEffort ?? model.reasoning?.defaultEffort
-        : model.reasoning?.defaultEffort
+        ? state.current?.reasoningEffort ?? model.selectedEffort ?? model.reasoning?.defaultEffort
+        : model.selectedEffort ?? model.reasoning?.defaultEffort
       return {
         provider: group.id,
         model: model.id,

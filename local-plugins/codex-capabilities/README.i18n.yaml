@@ -1,0 +1,34 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write local-plugins/codex-capabilities/README.md
+/:
+  en: 1caa8fabaa0b717f
+  zh: b63532dcdcc7e02f
+/codex-subscription-capabilities:
+  en: 978ed4370c72dafa
+  zh: cd7d27a4206055ef
+/codex-subscription-capabilities/summary:
+  en: c8baabdb06a6ed69
+  zh: 2329f35e2d908152
+/codex-subscription-capabilities/table-of-contents:
+  en: bfbccc97b94f8a0a
+  zh: 742fa4c9bef5b345
+/codex-subscription-capabilities/use-this-package:
+  en: bb3a9fbf521096cd
+  zh: f1157476f4aa8a7c
+/codex-subscription-capabilities/configuration:
+  en: ddb64b9679957635
+  zh: bc5b163cf7ac0dc7
+/codex-subscription-capabilities/understand-the-implementation:
+  en: debee454dac9e4d6
+  zh: 843b4083efe4625c
+/codex-subscription-capabilities/model-experience:
+  en: 19bc6a1a9de5370d
+  zh: 5440b34cddabc754
+/codex-subscription-capabilities/known-limitations-and-deferred-work:
+  en: 6d07356766982fd4
+  zh: e1e38170f7d47209
+/codex-subscription-capabilities/dev-note:
+  en: 551c3f843ccc449f
+  zh: 25fff8d3681d341a

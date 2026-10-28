@@ -92,8 +92,11 @@ export class ModelDirectory {
   async select(selection: ModelSelection): Promise<RemoteResult<void>> {
     this.assertAvailable()
     const previous = this.store.getSnapshot().current
-    const previousEffort = previous?.reasoningEffort ?? (previous === null ? undefined : this.catalog.reasoningFor(previous)?.defaultEffort)
-    const nextEffort = selection.reasoningEffort ?? this.catalog.reasoningFor(selection)?.defaultEffort
+    const previousEffort = previous?.reasoningEffort
+      ?? (previous === null ? undefined : (this.catalog.selectedEffortFor(previous) ?? this.catalog.reasoningFor(previous)?.defaultEffort))
+    const nextEffort = selection.reasoningEffort
+      ?? this.catalog.selectedEffortFor(selection)
+      ?? this.catalog.reasoningFor(selection)?.defaultEffort
     const generation = ++this.generation
     this.store.update((s) => { s.status = 'selecting'; s.pending = selection; s.error = null })
     const result = await this.sessions.selectModel({
@@ -123,6 +126,7 @@ export class ModelDirectory {
         ...this.isBlank() ? {} : { session_id: this.sessionId }, model_name: to, switch_from: previousEffort ?? 'default', switch_to: nextEffort ?? 'default',
       })
     }
+    this.catalog.updateSelectedEffort(selection)
     this.store.update((s) => { s.status = 'ready'; s.pending = null; s.error = null })
     this.syncInputs()
     return { ok: true, value: undefined }
@@ -161,7 +165,9 @@ export class ModelDirectory {
     const projected = modelSelectionProjection(this.projected.getSnapshot())
     const intended = projected?.next ?? catalog.value?.default
     const reasoning = intended === undefined ? undefined : this.catalog.reasoningFor(intended)
-    const effort = intended?.reasoningEffort ?? reasoning?.defaultEffort
+    const effort = intended?.reasoningEffort
+      ?? (intended === undefined ? undefined : this.catalog.selectedEffortFor(intended))
+      ?? reasoning?.defaultEffort
     const retainedEffort = effort === undefined ? undefined
       : reasoning?.efforts.find(level => level.id === effort)?.name ?? effort
     if (catalog.status !== 'ready' || catalog.value === null || projected === undefined) {

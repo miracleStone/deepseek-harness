@@ -31,6 +31,51 @@ export class ModelCatalogDirectory {
     return this.reasoning.get(JSON.stringify([selection.provider, selection.model]))
   }
 
+  /**
+   * Read the remembered reasoning effort for a model from the loaded catalog.
+   * @param selection - provider and model whose remembered effort is inspected.
+   * @returns remembered effort id or undefined when not set.
+   */
+  selectedEffortFor(selection: ModelSelection): string | undefined {
+    const value = this.store.getSnapshot().value
+    if (value === null) return undefined
+    for (const group of value.groups) {
+      if (group.id !== selection.provider) continue
+      const model = group.models.find(m => m.id === selection.model)
+      return model?.selectedEffort
+    }
+    return undefined
+  }
+
+  /**
+   * Update the remembered effort for a model in the shared catalog cache.
+   * @param selection - provider, model, and optional selected reasoning effort.
+   */
+  updateSelectedEffort(selection: ModelSelection): void {
+    this.store.update((draft) => {
+      if (draft.value === null) return
+      const groups = draft.value.groups.map((group) => {
+        if (group.id !== selection.provider) return group
+        return {
+          ...group,
+          models: group.models.map((model) => {
+            if (model.id !== selection.model) return model
+            const { selectedEffort: _removed, ...rest } = model
+            return {
+              ...rest,
+              ...selection.reasoningEffort === undefined ? {} : { selectedEffort: selection.reasoningEffort },
+            }
+          }),
+        }
+      })
+      draft.value = {
+        ...draft.value,
+        groups,
+        default: selection,
+      }
+    })
+  }
+
   private generation = 0
   private inflight: Promise<ModelCatalog> | undefined
 

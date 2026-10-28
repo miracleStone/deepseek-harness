@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.3/codex-capabilities-image-models/guide.md
+/:
+  en: 605a65578459b9f7
+  zh: b7f8962aac6c54d9
+/codex-image-tools-use-gpt-image-2-5:
+  en: b13cf5fd13923e11
+  zh: 9c19247f9c80964e
+/codex-image-tools-use-gpt-image-2-5/change:
+  en: 28b42e4befad04b8
+  zh: 2581440fc5d8928b
+/codex-image-tools-use-gpt-image-2-5/migration:
+  en: 2affe14b1ea30d3c
+  zh: 84ccb53e71dadf30

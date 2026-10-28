@@ -1,0 +1,7 @@
+- id: web
+  config:
+    searchProvider: codex-subscription
+    fetchProvider: http
+- insert:
+    - id: codex-capabilities
+      name: '@local/dsh-codex-capabilities'

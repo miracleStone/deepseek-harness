@@ -1,0 +1,8 @@
+version: 1
+scenario: codex-image-native
+profile: headless
+composition: codex-capabilities
+recording: authored
+header:
+  class: codex-capabilities
+  pin: true

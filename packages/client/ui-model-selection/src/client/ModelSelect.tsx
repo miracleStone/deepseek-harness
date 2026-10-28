@@ -108,24 +108,32 @@ export function ModelSelect(
     },
   })), [state.groups, accountProviderName])
   const choices = useMemo(() => groups.flatMap(group =>
-    group.models.map(model => ({
-      group,
-      model,
-      selection: {
-        provider: group.id,
-        model: model.id,
-        ...model.reasoning?.defaultEffort === undefined
-          ? {}
-          : { reasoningEffort: model.reasoning.defaultEffort },
-      } satisfies ModelSelection,
-    }))), [groups])
+    group.models.map((model) => {
+      const reasoningEffort = model.selectedEffort ?? model.reasoning?.defaultEffort
+      return {
+        group,
+        model,
+        selection: {
+          provider: group.id,
+          model: model.id,
+          ...reasoningEffort === undefined
+            ? {}
+            : { reasoningEffort },
+        } satisfies ModelSelection,
+      }
+    })), [groups])
   const showSearch = choices.length > 4
   const filteredGroups = useMemo(() => groups.map(group => ({
     ...group, models: rankByName(group.models, showSearch ? query.trim() : ''),
   })).filter(group => group.models.length > 0), [groups, query, showSearch])
-  const visibleModels = useMemo(() => filteredGroups.flatMap(group => group.models.map(model => ({
-    provider: group.id, model: model.id,
-  }))), [filteredGroups])
+  const visibleModels = useMemo(() => filteredGroups.flatMap(group => group.models.map((model) => {
+    const reasoningEffort = model.selectedEffort ?? model.reasoning?.defaultEffort
+    return {
+      provider: group.id,
+      model: model.id,
+      ...reasoningEffort === undefined ? {} : { reasoningEffort },
+    }
+  })), [filteredGroups])
   const currentVisibleIndex = visibleModels.findIndex(model =>
     model.provider === state.current?.provider && model.model === state.current.model)
   const activeModelIndex = Math.min(highlightedIndex ?? Math.max(0, currentVisibleIndex), visibleModels.length - 1)
@@ -607,7 +615,14 @@ export function ModelSelect(
                             key={model.id}
                             title={model.name}
                             disabled={busy}
-                            onClick={() => { choose({ provider: group.id, model: model.id }) }}
+                            onClick={() => {
+                              const reasoningEffort = model.selectedEffort ?? model.reasoning?.defaultEffort
+                              choose({
+                                provider: group.id,
+                                model: model.id,
+                                ...reasoningEffort === undefined ? {} : { reasoningEffort },
+                              })
+                            }}
                           >
                             <span className={css.optionCopy}>
                               <span className={css.modelName}>{renderModelLabel(group.provider, model, 'option', selected)}</span>
