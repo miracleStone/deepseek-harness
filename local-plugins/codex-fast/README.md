@@ -7,7 +7,7 @@ kind: "package-bundle"
 
 English | [中文](README.zh.md)
 
-Local deployment of the source adapter in this checkout, compatible with DSH 0.2.1-rc.2 and pi-ai 1.1.0. This bundle disables the original `llm-pi-ai` row without deleting its settings and mounts the rebuilt adapter with a snapshot of all existing provider routes. Only the Codex route gains `serviceTier: fast`; credentials and the default model/reasoning selection remain unchanged.
+Local deployment of the source adapter in this checkout, targeting DSH 0.2.2-alpha.2 and pi-ai 1.3.0; other DSH versions are refused by its manifest. This bundle disables the original `llm-pi-ai` row without deleting its settings and mounts the rebuilt adapter with a snapshot of all existing provider routes. Only the Codex route gains `serviceTier: fast`; credentials and the default model/reasoning selection remain unchanged.
 
 The generated adapter and profile-specific patch are ignored by Git. Keep this directory in place while the bundle is installed. Model/provider edits made while it is active belong to `codex-fast-adapter`, not the disabled original row. Removing or disabling this bundle restores the original adapter and its pre-install settings; later edits to the replacement do not migrate back automatically.
 

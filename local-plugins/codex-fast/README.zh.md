@@ -7,7 +7,7 @@ kind: "package-bundle"
 
 [English](README.md) | 中文
 
-这是本 checkout 中源码适配器的本地部署，兼容 DSH 0.2.1-rc.2 和 pi-ai 1.1.0。此组合包禁用原有 `llm-pi-ai` 条目但不删除其设置，并使用全部现有提供方路由的快照挂载重新构建的适配器。只有 Codex 路由增加 `serviceTier: fast`；凭据以及默认模型和推理强度选择保持不变。
+这是本 checkout 中源码适配器的本地部署，面向 DSH 0.2.2-alpha.2 和 pi-ai 1.3.0；manifest 拒绝其他 DSH 版本。此组合包禁用原有 `llm-pi-ai` 条目但不删除其设置，并使用全部现有提供方路由的快照挂载重新构建的适配器。只有 Codex 路由增加 `serviceTier: fast`；凭据以及默认模型和推理强度选择保持不变。
 
 生成的适配器和 profile 专用 patch 被 Git 忽略。组合包安装期间，请保留此目录。激活期间所做的模型／提供方编辑属于 `codex-fast-adapter`，不属于已禁用的原条目。移除或禁用此组合包会恢复原适配器及其安装前设置；之后对替代适配器的编辑不会自动迁回。
 
