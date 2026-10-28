@@ -125,6 +125,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'a detached provider, model, and optional reasoning selection.',
       },
       {
+        signature: 'effortForModel(provider: string, model: string): string | undefined',
+        description: 'Read the remembered reasoning effort for an exact model route.',
+        parameters: [{ name: 'provider', description: 'registered provider route.' }, { name: 'model', description: 'provider-owned model id.' }],
+        returns: 'the remembered reasoning effort, or undefined when none was selected.',
+      },
+      {
         signature: 'async saveSelection(next: ModelSelection): Promise<void>',
         description: 'Save the complete default model selection. A deployment without a configuration editor keeps its composition entry. Saves commit in submission order; a failed save rejects its caller without blocking later saves.',
         parameters: [{ name: 'next', description: 'resolved selection accepted by an entry point.' }],
@@ -7364,7 +7370,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelCatalogModel',
-    declaration: 'export interface ModelCatalogModel {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly reasoning?: ModelReasoning;\n    readonly badge?: LlmModelBadge;\n}',
+    declaration: 'export interface ModelCatalogModel {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly reasoning?: ModelReasoning;\n    readonly badge?: LlmModelBadge;\n    readonly selectedEffort?: string;\n}',
   },
   {
     name: 'ModelMessageSource',

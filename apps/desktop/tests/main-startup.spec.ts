@@ -575,6 +575,28 @@ describe('desktop main startup', () => {
     await harness.dialogShown.promise
   })
 
+  it.each(['web-boot', 'preload', 'renderer', 'document'])('revokes private readiness before fatal %s recovery waits for user input', async (kind) => {
+    const file = join(harness.app.getPath('userData'), 'desktop-ready.json')
+    vi.stubEnv('DSH_DESKTOP_READY_RECEIPT', file)
+    vi.stubEnv('DSH_DESKTOP_READY_NONCE', '11111111-2222-4333-8444-555555555555')
+    const host = await readyForUpdate()
+    await Promise.resolve(invoke(DESKTOP_IPC.boot))
+    expect(existsSync(file)).toBe(true)
+    const window = harness.windows[0]!
+    if (kind === 'web-boot') invoke(DESKTOP_IPC.bootFailed, 'app', 'client mount failed')
+    else if (kind === 'preload') window.webContents.emit('preload-error', {}, 'preload-app.cjs', new Error('preload unavailable'))
+    else if (kind === 'renderer') window.webContents.emit('render-process-gone', {}, { reason: 'crashed' })
+    else window.webContents.emit('did-fail-load', {}, -2, 'failed', 'dsh-app://app/', true)
+    expect(existsSync(file)).toBe(false)
+    expect(host.stop).not.toHaveBeenCalled()
+    await harness.dialogShown.promise
+    expect(host.stop).not.toHaveBeenCalled()
+    expect(harness.dialog.showMessageBox).toHaveBeenCalledOnce()
+    expect(writeCrashReport).toHaveBeenCalledWith(harness.app.getPath('logs'), expect.objectContaining({
+      source: kind === 'web-boot' ? 'web-boot' : 'renderer', phase: 'running',
+    }))
+  })
+
   it.each([true, false])('serves mandatory status before the first page load and after reload without policy queries (packaged=%s)', async (packaged) => {
     harness.app.isPackaged = packaged
     harness.probeMandatoryStatusOnLoad = true

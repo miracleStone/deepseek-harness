@@ -532,6 +532,14 @@ Owns the default model selection independently of any Host or transport. Each op
 currentSelection(): ModelSelection
 
 /**
+ * Read the remembered reasoning effort for an exact model route.
+ * @param provider - registered provider route.
+ * @param model - provider-owned model id.
+ * @returns the remembered reasoning effort, or undefined when none was selected.
+ */
+effortForModel(provider: string, model: string): string | undefined
+
+/**
  * Save the complete default model selection. A deployment without a configuration
  * editor keeps its composition entry. Saves commit in submission order; a failed
  * save rejects its caller without blocking later saves.

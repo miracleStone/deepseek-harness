@@ -65,6 +65,8 @@ export interface Config {
   model: Volatile<string>
   /** Adapter-owned reasoning effort; omission follows the provider default. */
   reasoningEffort: Volatile<string | undefined>
+  /** Remembered reasoning effort per model route, keyed by `${provider}/${model}`. */
+  efforts?: Volatile<Record<string, string | undefined>>
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-agent-default-model -->

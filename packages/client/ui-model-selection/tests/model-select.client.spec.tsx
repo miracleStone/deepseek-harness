@@ -96,7 +96,8 @@ describe('ModelSelect option rows', () => {
       'conversation.input.model.status': { kind: 'list', scope: 'session', inline: true },
       'conversation.input.model.options': { kind: 'list', scope: 'session' },
     }, ({ renderSlot, SessionProvider }) => <SessionProvider session={session}>
-      <ModelSelect locked={false} available directory={directory} load={vi.fn()} resolveText={resolveText} select={vi.fn()} t={t} renderSlot={renderSlot} />
+      <ModelSelect locked={false} available directory={directory} load={vi.fn()}
+        resolveText={resolveText} select={vi.fn()} t={t} renderSlot={renderSlot} />
     </SessionProvider>)
     const plugin = await runtime.mount({ inject: ['slots'], apply(ctx) {
       ctx.slots.inject('conversation.input.model.options', () => ctx.slots.register({
@@ -259,6 +260,8 @@ describe('ModelSelect catalog badges', () => {
     const session = runtime.sessions.retainFor(runtime.ctx, sessionId)
     await runtime.root.declare({
       'conversation.input.model.label': { kind: 'single', scope: 'session', inline: true },
+      'conversation.input.model.status': { kind: 'list', scope: 'session', inline: true },
+      'conversation.input.model.options': { kind: 'list', scope: 'session' },
     }, ({ renderSlot, SessionProvider }) => <SessionProvider session={session}>
       <ModelSelect locked={false} available directory={createSnapshotStore(badged())} load={vi.fn()} resolveText={chinese}
         select={vi.fn()} t={t} renderSlot={renderSlot} />
@@ -290,7 +293,8 @@ describe('ModelSelect status slot', () => {
       'conversation.input.model.status': { kind: 'list', scope: 'session', inline: true },
       'conversation.input.model.options': { kind: 'list', scope: 'session' },
     }, ({ renderSlot, SessionProvider }) => <SessionProvider session={session}>
-      <ModelSelect locked={false} available directory={directory} load={vi.fn()} resolveText={resolveText} select={vi.fn()} t={t} renderSlot={renderSlot} />
+      <ModelSelect locked={false} available directory={directory} load={vi.fn()}
+        resolveText={resolveText} select={vi.fn()} t={t} renderSlot={renderSlot} />
     </SessionProvider>)
     const label = await runtime.mount({ inject: ['slots'], apply(ctx) {
       ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({
@@ -329,7 +333,8 @@ describe('ModelSelect status slot', () => {
   it('does not render statuses for loading, absent, or missing catalog selections', () => {
     const directory = createSnapshotStore(state({ groups: [], status: 'loading' }))
     const renderSlot = vi.fn(() => null)
-    render(<ModelSelect locked={false} available directory={directory} load={vi.fn()} resolveText={resolveText} select={vi.fn()} t={t} renderSlot={renderSlot} />)
+    render(<ModelSelect locked={false} available directory={directory} load={vi.fn()}
+      resolveText={resolveText} select={vi.fn()} t={t} renderSlot={renderSlot} />)
     expect(renderSlot).not.toHaveBeenCalled()
     act(() => { directory.set(state({ current: null })) })
     expect(renderSlot).not.toHaveBeenCalled()

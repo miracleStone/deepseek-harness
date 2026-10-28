@@ -74,6 +74,7 @@ import { DesktopBackgroundNotice } from './background-notice.ts'
 import { DesktopStartupReceipt, resolveDesktopStartupReceiptTarget } from './startup-receipt.ts'
 
 let focusPrimaryWindow = (): void => {}
+let revokeStartupReceipt = (): void => {}
 let stopForRecovery = async (): Promise<void> => { await stopOperationReports() }
 let shuttingDown = false
 /**
@@ -173,6 +174,7 @@ function persistCrashReport(error: unknown, source: CrashReportSource): Promise<
 }
 
 function reportFatal(error: unknown, source: CrashReportSource): void {
+  revokeStartupReceipt()
   console.error(error)
   if (shuttingDown) {
     // No dialog during shutdown, but the report still records what failed on the way out.
@@ -374,7 +376,7 @@ async function main(): Promise<void> {
   const receiptTarget = resolveDesktopStartupReceiptTarget(process.env)
   const startupReceipt = receiptTarget === undefined ? undefined
     : new DesktopStartupReceipt(receiptTarget, { mainPid: process.pid, version: app.getVersion() })
-  const revokeStartupReceipt = (): void => {
+  revokeStartupReceipt = (): void => {
     try { startupReceipt?.revoke() }
     catch (error) { console.error('Desktop startup receipt could not be revoked; local upgrade readiness is untrusted.', error) }
   }
