@@ -237,6 +237,15 @@ describe('share reader access policy', () => {
     expect(decide('workspace/rename', workspace('shared-ws'))).toEqual(deny('liveshare/read-only'))
   })
 
+  it.each(['view', 'write'] as const)('refuses Workspace folder mutations in the %s tier', async (mode) => {
+    const { decide, grants } = await fixture({ mode })
+    expect(decide('workspace/follow', workspace('shared-ws'))).toEqual(ALLOW)
+    for (const action of ['workspace/addFolder', 'workspace/removeFolder'] as const) {
+      expect(decide(action, workspace('shared-ws'))).toEqual(deny('liveshare/read-only'))
+      expect(grants().some(grant => grant.actions.includes(action))).toBe(false)
+    }
+  })
+
   it('allows forking the shared Session and the reader’s own active fork while the share’s switch is on', async () => {
     // Forking is its own switch: both tiers may carry it, and a share whose owner turned it off refuses.
     expect((await fixture({ mode: 'view' })).decide('session/fork', session('source'), CALL)).toEqual(ALLOW)

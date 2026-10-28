@@ -1,5 +1,5 @@
 /**
- * A shared reader never obtains the Owner's global configuration document.
+ * A shared reader never obtains the Owner's global configuration document or changes Workspace folders.
  *
  * The reader's calls reach the Owner's Gateway as the reader's own Peer, and the Gateway admits a
  * non-owner Peer only to the actions this package's `share-viewer` policy binds, so the Owner's
@@ -9,6 +9,9 @@ import { Context } from '@deepseek-ai/cordis'
 import RemoteAccessService from '@deepseek-ai/dsh-api-remote-access'
 import TypertGateway from '@deepseek-ai/dsh-api-gateway'
 import SettingsController from '@deepseek-ai/dsh-api-settings-controller'
+import WorkspaceController from '@deepseek-ai/dsh-api-workspace-controller'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { Peer, type ConnectionRpcResult } from '@deepseek-ai/dsh-client-connection'
 import type { SettingsDescriptor } from '@deepseek-ai/dsh-settings'
 import { Remote, TypertRemoteService, type PeerScope, type Principal } from '@deepseek-ai/dsh-typert-protocol'
@@ -79,7 +82,7 @@ async function harness(mode: 'view' | 'write' = 'view') {
       listForShare: () => [],
       allowsPrompt: () => ({ ok: false, code: 'fork-unknown-child', message: 'this Owner holds no forks' }),
     },
-    workspaces: () => [],
+    workspaces: () => [{ id: WorkspaceId('shared-ws'), sessionIds: [SessionId(share.sessionId)] }],
     offeredPlugins: () => [],
   }))
   // The Owner's shared `/api` handler: one Connection request decoded and handed to the Gateway as its Peer.
@@ -101,9 +104,9 @@ async function harness(mode: 'view' | 'write' = 'view') {
     reader.close()
     await readers.dispose()
   })
-  const read = (method: string) => reader.answer('share', {
+  const read = (method: string, args: object = {}) => reader.answer('share', {
     op: 'call', path: `/api/${method}`,
-    body: { type: 'client-request', rpcId: `${method}-read`, method, payload: { args: {} } },
+    body: { type: 'client-request', rpcId: `${method}-read`, method, payload: { args } },
   }, actor)
   return { ctx, rpc, read, describeSettings, commands }
 }
@@ -119,6 +122,25 @@ describe('shared reader configuration privacy', () => {
       for (const value of privateValues) expect(JSON.stringify(answer)).not.toContain(value)
     }
     expect(describeSettings).not.toHaveBeenCalled()
+  })
+
+  it.each(['view', 'write'] as const)('refuses Workspace folder mutations through the Gateway in %s', async (mode) => {
+    const { ctx, read } = await harness(mode)
+    const lookupWorkspace = vi.fn()
+    ctx.provide('workspaceRegistry', {
+      list: () => [], archivedSessionIds: [], pinnedSessionIds: [], get: lookupWorkspace,
+    } as never)
+    await ctx.plugin(WorkspaceController)
+    expect(ctx.remoteAccess.decide({ principal: { kind: 'share-viewer', shareId: 'share', actor },
+      action: 'workspace/follow', resources: [{ kind: 'workspace', id: WorkspaceId('shared-ws') }],
+    })).toEqual({ kind: 'allow' })
+    for (const method of ['workspace/addFolder', 'workspace/removeFolder']) {
+      expect(await read(method, { request: { workspaceId: 'shared-ws', path: process.cwd() } }))
+        .toMatchObject({ status: 200, body: { result: {
+          ok: false, error: { code: 'remote-access/denied', details: { action: method, reason: 'liveshare/read-only' } },
+        } } })
+    }
+    expect(lookupWorkspace).not.toHaveBeenCalled()
   })
 
   it('keeps an allowed page read available to the same reader', async () => {
