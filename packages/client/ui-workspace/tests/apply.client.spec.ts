@@ -847,7 +847,7 @@ describe('ui-workspace apply', () => {
     declare(b.slots, 'shell.overlay')
     const sidebar = () => b.slots.register({
       name: 'shell.overlay', id: 'test-sidebar-owner',
-      children: { 'sidebar.workspaces': { kind: 'single', scope: 'root' } },
+      children: { 'sidebar.workspaces': { kind: 'single', scope: 'root', inject: SECTION_INJECT } },
     }, SidebarDeclarationOwner)
     const removeSidebar = sidebar()
     await b.ctx.plugin({ inject: [...inject], apply }).await()

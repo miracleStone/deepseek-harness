@@ -11,6 +11,7 @@ import type { TeamProjection, TeamTaskId, TeamTaskView } from '@deepseek-ai/dsh-
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm/brand'
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
+import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   SubagentCatalogAction, SubagentHeaderLineage,
   type SubagentCatalogActionProps, type SubagentHeaderLineageProps,
@@ -30,8 +31,14 @@ const CHILD = 'child' as SessionId
 const GRANDCHILD = 'grandchild' as SessionId
 const t: SubagentHeaderLineageProps['t'] = makeTranslate(zh)
 
-type HeaderCatalogProps = SubagentHeaderLineageProps
-  & Pick<SubagentCatalogActionProps, 'useFooterAvailable' | 'renderSlot'>
+type HeaderCatalogRenderSlots = PropsRenderSlots<
+  'subagent.lineage.item.meta'
+  | 'conversation.session.header.actions.subagent.item.meta'
+  | 'conversation.session.header.actions.subagent.footer'
+>
+type HeaderCatalogProps = Omit<SubagentHeaderLineageProps, keyof HeaderCatalogRenderSlots>
+  & Pick<SubagentCatalogActionProps, 'useFooterAvailable'>
+  & HeaderCatalogRenderSlots
 
 type CatalogFixtureEntry<Entry = SubagentCatalogEntry> = Entry extends SubagentCatalogEntry
   ? Omit<Entry, 'createdAt'> & { activity: 'running' | 'inactive' }
