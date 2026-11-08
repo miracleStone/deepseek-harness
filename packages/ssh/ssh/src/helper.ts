@@ -283,11 +283,11 @@ export async function runSshHelper(transport: HelperTransport): Promise<void> {
       if (method === 'fs.patch') {
         const input = schema.extend({ hunks: z.array(hunkSchema) }).parse(raw)
         return ctx.fs.patchText(asTarget(input.target), input.hunks,
-          input.expected as { version: FsVersion } | undefined, signal, await policy(input.policy, signal))
+          input.expected as { version: FsVersion } | undefined, signal, await resolveHelperPolicy(ctx.fs, input.policy, signal))
       }
       const input = schema.parse(raw)
       return ctx.fs.deleteFile(asTarget(input.target), input.expected as { version: FsVersion } | undefined,
-        signal, await policy(input.policy, signal))
+        signal, await resolveHelperPolicy(ctx.fs, input.policy, signal))
     }
     if (method === 'fs.move') {
       const input = z.object({
@@ -298,7 +298,7 @@ export async function runSshHelper(transport: HelperTransport): Promise<void> {
         ...(hunks === undefined ? {} : { hunks }),
         ...(expectedSource === undefined ? {} : { expectedSource: { version: expectedSource.version as FsVersion } }),
         ...(expectedDestination === undefined ? {} : { expectedDestination: expectedDestination as FsWriteIntent }),
-      }, signal, await policy(input.policy, signal))
+      }, signal, await resolveHelperPolicy(ctx.fs, input.policy, signal))
     }
     throw new Error(`Unknown SSH helper operation: ${method}`)
   })
