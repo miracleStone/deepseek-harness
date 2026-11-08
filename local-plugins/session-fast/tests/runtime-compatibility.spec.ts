@@ -28,16 +28,16 @@ function candidateRoot(): string {
 
 const candidateManifest = (bundle: string): Manifest => manifest(resolve(candidateRoot(), bundle, 'package.json'))
 
-describe('linked legacy bundles stay qualified for the installed Desktop runtime', () => {
-  it.each(bundles)('preserves %s alpha.2 qualification without relabeling old bundles', (bundle) => {
+describe('linked bundles stay qualified for the target Desktop runtime', () => {
+  it.each(bundles)('qualifies %s for runtime 0.2.2-rc.1', (bundle) => {
     const metadata = manifest(`local-plugins/${bundle}/package.json`)
-    expect(metadata.engines?.dsh).toBe(legacyRuntime)
-    expect(evaluatePluginCompatibility(metadata, {}, legacyRuntime)).toBeUndefined()
-    expect(evaluatePluginCompatibility(metadata, {}, runtime)).toMatchObject({
-      requirements: { 'engines.dsh': legacyRuntime }, exempted: false,
+    expect(metadata.engines?.dsh).toBe(runtime)
+    expect(evaluatePluginCompatibility(metadata, {}, runtime)).toBeUndefined()
+    expect(evaluatePluginCompatibility(metadata, {}, legacyRuntime)).toMatchObject({
+      requirements: { 'engines.dsh': runtime }, exempted: false,
     })
     for (const [name, version] of Object.entries(metadata.peerDependencies ?? {})) {
-      if (name.startsWith('@deepseek-ai/dsh-')) expect(version).toBe(legacyRuntime)
+      if (name.startsWith('@deepseek-ai/dsh-')) expect(version).toBe(runtime)
     }
   })
 })

@@ -13,7 +13,7 @@ describe('Fast UI preference transport', () => {
     const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
       const payload = JSON.parse(String(init.body)) as { sessionId: string; enabled?: boolean }
       if (payload.enabled !== undefined) values.set(payload.sessionId, payload.enabled)
-      return Response.json({ enabled: values.get(payload.sessionId) ?? true })
+      return Response.json({ enabled: values.get(payload.sessionId) ?? false })
     })
     let provider: Resource | undefined
     let actions: Actions | undefined
@@ -47,21 +47,21 @@ describe('Fast UI preference transport', () => {
       for (let i = 0; i < 3; i++) {
         const controller = new AbortController()
         const stream = provider!.open('dsh-resource://session-fast/session-a', { signal: controller.signal })
-        expect((await stream.next()).value).toEqual({ ok: true, value: { enabled: true } })
+        expect((await stream.next()).value).toEqual({ ok: true, value: { enabled: false } })
         controller.abort()
         await stream.return(undefined)
       }
-      await expect(actions!.save('session-a', false)).resolves.toEqual({ enabled: false })
-      await expect(actions!.refresh('session-a')).resolves.toEqual({ enabled: false })
-      await expect(actions!.refresh('session-b')).resolves.toEqual({ enabled: true })
+      await expect(actions!.save('session-a', true)).resolves.toEqual({ enabled: true })
+      await expect(actions!.refresh('session-a')).resolves.toEqual({ enabled: true })
+      await expect(actions!.refresh('session-b')).resolves.toEqual({ enabled: false })
       const controller = new AbortController()
       const stream = provider!.open('dsh-resource://session-fast/session-a', { signal: controller.signal })
       try {
-        expect((await stream.next()).value).toEqual({ ok: true, value: { enabled: false } })
-        await actions!.save('session-a', true)
         expect((await stream.next()).value).toEqual({ ok: true, value: { enabled: true } })
         await actions!.save('session-a', false)
         expect((await stream.next()).value).toEqual({ ok: true, value: { enabled: false } })
+        await actions!.save('session-a', true)
+        expect((await stream.next()).value).toEqual({ ok: true, value: { enabled: true } })
       } finally {
         controller.abort()
         await stream.return(undefined)

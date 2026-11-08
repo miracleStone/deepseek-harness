@@ -23,13 +23,13 @@ async function open(pool = new MemoryMediaPool()) {
 }
 
 describe('session Fast preferences', () => {
-  it('defaults to enabled without writing and isolates sessions', async () => {
+  it('defaults to disabled without writing and isolates sessions', async () => {
     const { domain, preferences } = await open()
-    expect(preferences.get('session-a')).toEqual({ enabled: true, serviceTier: 'fast' })
-    expect(domain.table('sessions').size).toBe(0)
-    await preferences.set('session-a', false)
     expect(preferences.get('session-a')).toEqual({ enabled: false, serviceTier: 'default' })
-    expect(preferences.get('session-b')).toEqual({ enabled: true, serviceTier: 'fast' })
+    expect(domain.table('sessions').size).toBe(0)
+    await preferences.set('session-a', true)
+    expect(preferences.get('session-a')).toEqual({ enabled: true, serviceTier: 'fast' })
+    expect(preferences.get('session-b')).toEqual({ enabled: false, serviceTier: 'default' })
   })
 
   it('reopens committed on and off records instead of applying the default again', async () => {
@@ -44,13 +44,13 @@ describe('session Fast preferences', () => {
 
   it('keeps committed state and medium unchanged after a failed write', async () => {
     const { pool, domain, preferences } = await open()
-    await preferences.set('session', false)
+    await preferences.set('session', true)
     pool.failNextWrites = 1
-    await expect(preferences.set('session', true)).rejects.toThrow('injected write failure')
-    expect(preferences.get('session')).toEqual({ enabled: false, serviceTier: 'default' })
+    await expect(preferences.set('session', false)).rejects.toThrow('injected write failure')
+    expect(preferences.get('session')).toEqual({ enabled: true, serviceTier: 'fast' })
     await domain.close()
     const reopened = await open(pool)
-    expect(reopened.preferences.get('session')).toEqual({ enabled: false, serviceTier: 'default' })
+    expect(reopened.preferences.get('session')).toEqual({ enabled: true, serviceTier: 'fast' })
   })
 
   it('publishes no optimistic setting before backend durability', async () => {
@@ -62,11 +62,11 @@ describe('session Fast preferences', () => {
         commit = () => { records.set(id, value); resolve() }
       }),
     })
-    const pending = preferences.set('session', false)
-    expect(preferences.get('session')).toEqual({ enabled: true, serviceTier: 'fast' })
+    const pending = preferences.set('session', true)
+    expect(preferences.get('session')).toEqual({ enabled: false, serviceTier: 'default' })
     expect(commit).toBeTypeOf('function')
     commit!()
-    await expect(pending).resolves.toEqual({ enabled: false, serviceTier: 'default' })
+    await expect(pending).resolves.toEqual({ enabled: true, serviceTier: 'fast' })
   })
 
   it('rejects malformed stored preference records on open', async () => {

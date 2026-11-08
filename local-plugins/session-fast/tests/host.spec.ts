@@ -64,12 +64,12 @@ describe('user-only session Fast controls', () => {
   it('opens the menu repeatedly and writes preferences without executing logged commands', async () => {
     const host = await boot()
     for (let i = 0; i < 3; i++) {
-      expect(await host.state({ sessionId: 'a' })).toEqual({ enabled: true })
+      expect(await host.state({ sessionId: 'a' })).toEqual({ enabled: false })
     }
-    expect(await host.state({ sessionId: 'a', enabled: false })).toEqual({ enabled: false })
-    expect(await host.state({ sessionId: 'a' })).toEqual({ enabled: false })
-    expect(await host.state({ sessionId: 'b' })).toEqual({ enabled: true })
-    expect(host.tier('a')).toBe('default')
+    expect(await host.state({ sessionId: 'a', enabled: true })).toEqual({ enabled: true })
+    expect(await host.state({ sessionId: 'a' })).toEqual({ enabled: true })
+    expect(await host.state({ sessionId: 'b' })).toEqual({ enabled: false })
+    expect(host.tier('a')).toBe('fast')
     expect(host.executeCommand).not.toHaveBeenCalled()
     expect(host.registerTool).not.toHaveBeenCalled()
   })
@@ -81,15 +81,15 @@ describe('user-only session Fast controls', () => {
     expect(await host.state({ sessionId: 'a', extra: true })).toMatchObject({ status: 400, error: { code: 'session-fast/invalid-request' } })
     const malformed = await host.post(undefined)
     expect(malformed.status).toBe(400)
-    expect(host.tier('a')).toBe('fast')
+    expect(host.tier('a')).toBe('default')
     expect(host.executeCommand).not.toHaveBeenCalled()
   })
 
   it('reports failed writes without changing committed preferences', async () => {
     const host = await boot()
     host.pool.failNextWrites = 1
-    expect(await host.state({ sessionId: 'a', enabled: false })).toMatchObject({ status: 503, error: { code: 'session-fast/storage-failed' } })
-    expect(host.tier('a')).toBe('fast')
+    expect(await host.state({ sessionId: 'a', enabled: true })).toMatchObject({ status: 503, error: { code: 'session-fast/storage-failed' } })
+    expect(host.tier('a')).toBe('default')
     expect(host.executeCommand).not.toHaveBeenCalled()
   })
 
@@ -102,19 +102,19 @@ describe('user-only session Fast controls', () => {
 
   it('preserves the UI command and keeps committed settings isolated by session', async () => {
     const host = await boot()
-    expect(await host.command('status')).toEqual({ kind: 'success', text: '{"enabled":true}' })
-    expect(await host.command('off')).toEqual({ kind: 'success', text: '{"enabled":false}' })
-    expect(host.tier('a')).toBe('default')
-    expect(host.tier('b')).toBe('fast')
+    expect(await host.command('status')).toEqual({ kind: 'success', text: '{"enabled":false}' })
     expect(await host.command('on')).toEqual({ kind: 'success', text: '{"enabled":true}' })
     expect(host.tier('a')).toBe('fast')
+    expect(host.tier('b')).toBe('default')
+    expect(await host.command('off')).toEqual({ kind: 'success', text: '{"enabled":false}' })
+    expect(host.tier('a')).toBe('default')
     expect(host.commands.get('fast')!.recordInput).toBe(false)
   })
 
   it.each(['antigravity', 'sinapisai', 'google', 'anthropic', 'openai'])(
     'leaves %s tier resolution and model tools untouched', async (provider) => {
       const host = await boot()
-      await host.command('off')
+      await host.command('on')
       expect(host.tier('a', provider)).toBe('fast')
       expect(host.registerTool).not.toHaveBeenCalled()
     },
@@ -122,25 +122,25 @@ describe('user-only session Fast controls', () => {
 
   it('delegates agentless requests to the provider default', async () => {
     const host = await boot()
-    await host.command('off')
+    await host.command('on')
     expect(host.tier()).toBe('fast')
-    expect(host.tier('a')).toBe('default')
+    expect(host.tier('a')).toBe('fast')
     expect(adapterApply.mock.calls[0]?.[1].providers.get()).toEqual({ 'openai-codex': { serviceTier: 'fast' } })
   })
 
   it('keeps the previous setting when saving fails', async () => {
     const host = await boot()
-    await host.command('off')
+    await host.command('on')
     host.pool.failNextWrites = 1
-    expect(await host.command('on')).toMatchObject({ kind: 'error' })
-    expect(host.tier('a')).toBe('default')
+    expect(await host.command('off')).toMatchObject({ kind: 'error' })
+    expect(host.tier('a')).toBe('fast')
     expect(host.warn).toHaveBeenCalledOnce()
   })
 
   it('rejects an invalid user command without changing the setting', async () => {
     const host = await boot()
     expect(await host.command('toggle')).toMatchObject({ kind: 'error' })
-    expect(host.tier('a')).toBe('fast')
+    expect(host.tier('a')).toBe('default')
   })
 
   it('removes the command and closes its domain on disposal', async () => {

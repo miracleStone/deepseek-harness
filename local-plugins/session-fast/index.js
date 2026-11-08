@@ -12,7 +12,7 @@ export async function apply(ctx, config) {
   const domain = await ctx.storageDomain.open(preferencesSpec)
   ctx.effect(() => () => domain.close())
   const providers = config.providers.get()
-  const preferences = new SessionFastPreferences(domain.table('sessions'), providers['openai-codex']?.serviceTier === 'fast')
+  const preferences = new SessionFastPreferences(domain.table('sessions'), providers['openai-codex']?.defaultFast === true)
 
   ctx.effect(() => registerFastApi(ctx, preferences))
 

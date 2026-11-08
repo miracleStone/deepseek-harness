@@ -10,7 +10,7 @@ export const preferencesSpec = defineDomain({
 
 /** Reads the domain's committed memory; writes resolve only after durable storage. */
 export class SessionFastPreferences {
-  constructor(table, defaultEnabled = true) {
+  constructor(table, defaultEnabled = false) {
     this.table = table
     this.defaultEnabled = defaultEnabled
   }
