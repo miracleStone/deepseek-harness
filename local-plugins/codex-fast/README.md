@@ -17,4 +17,4 @@ Use Plugin Manager to install this directory. The original PNG lightning icon is
 
 ## Prepare after building
 
-Run `prepare.mjs` with the current desktop profile patch path to copy the built adapter and provider settings into the bundle. Preparation reads but does not modify the source profile. It refuses an existing tier so a different preference is not silently overwritten. Install and activation are separate Plugin Manager operations.
+The source directory remains the installed DSH 0.2.2-alpha.2 link target. [Candidate preparation](../session-fast/README.md#isolated-candidate-builds) requires an explicit, new output directory below repository `.artifacts` and generates all three bundles for the current root version. It never rewrites source manifests, adapters, patches, or versioned runtime files. An optional `--profile-patch` reads the original `llm-pi-ai` override and refuses an existing tier; without it, preparation reads the preserved Codex Fast patch. Preparation never installs or activates plugins.

@@ -5117,6 +5117,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'request', description: 'immutable routing metadata from the exact prepared call.' }, { name: 'headers', description: 'fresh profile headers, shared only within this dispatch.' }, { name: 'next', description: 'continue header preparation through the remaining listeners.' }],
   },
   {
+    name: 'llm-pi-ai/service-tier',
+    mode: 'waterfall',
+    signature: '\'llm-pi-ai/service-tier\'( request: PiAiServiceTierRequest, next: () => Promise<\'default\' | \'fast\' | undefined>, ): Promise<\'default\' | \'fast\' | undefined>',
+    summary: 'Resolve one Codex request\'s service tier at dispatch without changing its model or reasoning controls.',
+    description: 'Resolve one Codex request\'s service tier at dispatch without changing its model or reasoning controls. Listeners that do not own the request call next().',
+    parameters: [{ name: 'request', description: 'exact request identity and the captured provider preference.' }, { name: 'next', description: 'delegate to the next resolver, ending with the provider preference.' }],
+  },
+  {
     name: 'llm/adapters-updated',
     mode: 'emit',
     signature: '\'llm/adapters-updated\'(): void',
@@ -7555,6 +7563,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PiAiRequestHeaderContext',
     declaration: 'export interface PiAiRequestHeaderContext extends Readonly<Pick<GenerateOptions<string>, \'provider\' | \'model\' | \'sessionId\' | \'purpose\'>> {\n    readonly baseURL: string;\n}',
+  },
+  {
+    name: 'PiAiServiceTierRequest',
+    declaration: 'export interface PiAiServiceTierRequest {\n    readonly provider: string;\n    readonly model: string;\n    readonly sessionId?: GenerateOptions[\'sessionId\'];\n    readonly defaultTier?: \'default\' | \'fast\';\n}',
   },
   {
     name: 'PlatformSession',

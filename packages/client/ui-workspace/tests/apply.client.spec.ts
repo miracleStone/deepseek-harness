@@ -853,6 +853,8 @@ describe('ui-workspace apply', () => {
     await b.ctx.plugin({ inject: [...inject], apply }).await()
     const browser = faceOf(b.slots.entries('sidebar.workspaces')[0]!) as WorkspaceBrowserInjected
     const toast = faceOf(entry(b.slots, 'shell.overlay', 'workspace.row-toast')) as RowToastInjected
+    expect(b.slots.entries(ROW_ACTION)).toHaveLength(2)
+    expect(b.slots.spec(MENU_ITEM)).toMatchObject({ kind: 'list' })
     const notices = ['folderAdded', 'folderRemoved', 'folderAddFailed', 'folderRemoveFailed', 'folderPickerFailed'] as const
     for (const [index, kind] of notices.entries()) {
       browser.notifyWorkspaceFolder({ kind })
@@ -860,13 +862,17 @@ describe('ui-workspace apply', () => {
     }
     removeSidebar()
     expect(b.slots.spec('sidebar.workspaces.directoryFlow')).toBeUndefined()
+    expect(b.slots.entries(ROW_ACTION)).toHaveLength(0)
+    expect(b.slots.spec(MENU_ITEM)).toMatchObject({ kind: 'list' })
     expect(b.slots.entries(MENU_ITEM)).toHaveLength(0)
     browser.notifyWorkspaceFolder({ kind: 'folderAdded' })
     expect(toast.hooks.toast.getSnapshot()).toEqual({ kind: 'folderAdded', seq: 6 })
     sidebar()
     expect(b.slots.entries('sidebar.workspaces')).toHaveLength(1)
     expect(b.slots.spec('sidebar.workspaces.directoryFlow')).toMatchObject({ kind: 'single' })
-    expect(b.slots.entries(MENU_ITEM)).toHaveLength(5)
+    expect(b.slots.entries(ROW_ACTION)).toHaveLength(2)
+    expect(b.slots.spec(MENU_ITEM)).toMatchObject({ kind: 'list' })
+    expect(b.slots.entries(MENU_ITEM)).toHaveLength(0)
     expect(b.slots.entries('workspace.toast').filter(row => row.options.key === 'folderAdded')).toHaveLength(1)
     expect(toast.hooks.toast.getSnapshot()).toEqual({ kind: 'folderAdded', seq: 6 })
   })

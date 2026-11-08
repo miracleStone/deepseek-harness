@@ -17,4 +17,4 @@ kind: "package-bundle"
 
 ## 构建后准备
 
-使用当前桌面 profile patch 路径运行 `prepare.mjs`，将已构建适配器及提供方设置复制到组合包中。准备过程读取但不修改源 profile。若已有档位设置，则拒绝准备，避免静默覆盖另一偏好。安装和激活是分开的 Plugin Manager 操作。
+源目录仍是已安装 DSH 0.2.2-alpha.2 的 link 目标。[候选准备流程](../session-fast/README.zh.md#isolated-candidate-builds) 必须显式选择仓库 `.artifacts` 下的新输出目录，并为当前根版本生成全部三个组合包。它从不改写源 manifest、adapter、patch 或带版本的运行文件。可选的 `--profile-patch` 读取原始 `llm-pi-ai` override，并拒绝已有档位；不提供时，准备流程读取已保留的 Codex Fast patch。准备流程从不安装或激活插件。

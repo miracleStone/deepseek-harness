@@ -37,13 +37,13 @@ for line in sys.stdin:
     message = json.loads(line)
     if message["method"] == "initialize":
         result = {"serverInfo": {"name": "workspace-roots-fixture"}}
-    elif message["method"] == "session/prompt":
+    elif message["method"] == "session/query":
         session_id = message["params"]["sessionId"]
         notify("session.event", {"sessionId": session_id, "event": {
             "type": "agent/inbox/spliced", "seq": 0, "time": 0,
             "data": {"target": "next-turn", "start": 0, "inserted": [{"id": "accepted"}]}}})
         notify("session.status", {"sessionId": session_id, "status": "running"})
-        print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": {"messageId": "accepted"}}), flush=True)
+        print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": {"kind": "prompt", "messageId": "accepted"}}), flush=True)
         notify("session.event", {"sessionId": session_id, "event": {
             "type": "turn/start", "seq": 1, "time": 0, "data": {"turn": 0}}})
         notify("session.event", {"sessionId": session_id, "event": {"type": "assistant/message", "seq": 2, "time": 0,

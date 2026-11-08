@@ -419,7 +419,9 @@ describe('SubagentHeaderLineage', () => {
   it('leaves task-board keys alone and dismisses the shared panel from outside focus', () => {
     const input = props(catalog())
     render(<><textarea aria-label="Composer" /><HeaderCatalog {...input}
-      renderSlot={() => <button type="button">Expand task</button>}
+      renderSlot={(name, _owner, options) => name === 'conversation.session.header.actions.subagent.footer'
+        ? <button type="button">Expand task</button>
+        : options?.fallback ?? null}
     /></>)
     fireEvent.click(screen.getByRole('button', { name: /\d+ 个子智能体$/ }))
     const expand = screen.getByRole('button', { name: 'Expand task' })
@@ -577,37 +579,37 @@ describe('SubagentHeaderLineage', () => {
 
   it.each([true, false].flatMap(contributed => ['root', 'lineage'].map(entry => ({ contributed, entry }))))(
     'shows model metadata once in $entry with a contribution or its fallback ($contributed)', ({ contributed, entry }) => {
-    const input = props(catalog({
-      entries: [{ id: CHILD, mode: 'continuable', label: 'worker', activity: 'inactive' }],
-    }), {}, {
-      [CHILD]: {
-        ...summary(CHILD, 1), parentId: PARENT, origin: 'subagent',
-        projectionValues: { modelSelection: {
-          lastUsed: { provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: ReasoningEffortId('high') },
-          next: null,
-        } },
-      },
+      const input = props(catalog({
+        entries: [{ id: CHILD, mode: 'continuable', label: 'worker', activity: 'inactive' }],
+      }), {}, {
+        [CHILD]: {
+          ...summary(CHILD, 1), parentId: PARENT, origin: 'subagent',
+          projectionValues: { modelSelection: {
+            lastUsed: { provider: 'deepseek-official', model: 'deepseek-chat', reasoningEffort: ReasoningEffortId('high') },
+            next: null,
+          } },
+        },
+      })
+      const headerProps: HeaderCatalogProps = {
+        ...input,
+        lineageSessionId: entry === 'lineage' ? CHILD : PARENT,
+        displayTitle: 'worker',
+        renderSlot: (name, owner, options) => {
+          if (name === 'conversation.session.header.actions.subagent.footer') return <span>Task footer</span>
+          expect(name).toBe(entry === 'lineage' ? 'subagent.lineage.item.meta' : 'conversation.session.header.actions.subagent.item.meta')
+          if (!contributed) return options?.fallback ?? null
+          expect(owner).toEqual({ childSessionId: CHILD })
+          return <span>deepseek-chat (high)</span>
+        },
+      }
+      render(<HeaderCatalog {...headerProps} />)
+      hoverCatalog(screen.getByRole('button', { name: entry === 'lineage' ? '切换子智能体：worker' : '1 个子智能体' }))
+      expect(screen.queryByText('Task footer') !== null).toBe(entry === 'root')
+      const row = screen.getByRole('treeitem', { name: /worker.*deepseek-chat/ })
+      expect(row.textContent?.match(/deepseek-chat/g)).toHaveLength(1)
+      expect(row.textContent).toContain('deepseek-chat (high)')
+      expect(row.getAttribute('aria-label')?.match(/deepseek-chat/g)).toHaveLength(1)
     })
-    const headerProps: HeaderCatalogProps = {
-      ...input,
-      lineageSessionId: entry === 'lineage' ? CHILD : PARENT,
-      displayTitle: 'worker',
-      renderSlot: (name, owner, options) => {
-        if (name === 'conversation.session.header.actions.subagent.footer') return <span>Task footer</span>
-        expect(name).toBe(entry === 'lineage' ? 'subagent.lineage.item.meta' : 'conversation.session.header.actions.subagent.item.meta')
-        if (!contributed) return options?.fallback ?? null
-        expect(owner).toEqual({ childSessionId: CHILD })
-        return <span>deepseek-chat (high)</span>
-      },
-    }
-    render(<HeaderCatalog {...headerProps} />)
-    hoverCatalog(screen.getByRole('button', { name: entry === 'lineage' ? '切换子智能体：worker' : '1 个子智能体' }))
-    expect(screen.queryByText('Task footer') !== null).toBe(entry === 'root')
-    const row = screen.getByRole('treeitem', { name: /worker.*deepseek-chat/ })
-    expect(row.textContent?.match(/deepseek-chat/g)).toHaveLength(1)
-    expect(row.textContent).toContain('deepseek-chat (high)')
-    expect(row.getAttribute('aria-label')?.match(/deepseek-chat/g)).toHaveLength(1)
-  })
 
   it('selects singular count keys for one direct child', () => {
     const base = props(catalog({

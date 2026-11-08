@@ -14,3 +14,31 @@ This local bundle adds a Codex-only Fast row below the reasoning control and a n
 This bundle targets DSH 0.2.2-alpha.2 and pi-ai 1.3.0; its manifest refuses other DSH versions. Install the accompanying `session-model-picker` bundle to provide the model-menu extension slot. Keep both local directories in place while installed. This bundle preserves the provider routes and sign-in from the earlier Codex Fast adapter and disables that adapter row without deleting its settings. Disabling this bundle restores the earlier adapter; its global Fast setting then applies again.
 
 Fast consumes more subscription quota; account eligibility and actual priority allocation are controlled by OpenAI. This switch requests a tier, not a guaranteed response speed.
+
+<a id="isolated-candidate-builds"></a>
+## Isolated candidate builds
+
+The source manifests and ignored runtime artifacts remain installed Desktop DSH 0.2.2-alpha.2 inputs. Both preparation entry points require `--candidate-root`; omitted arguments, source directories, existing outputs, and symlinked output ancestors are rejected. A candidate build reads current `llm-pi-ai/lib/index.js` and `ui-model-selection/lib/client.js`, bundles the Session Fast host and browser source, and copies runtime files, locales, icons, bilingual READMEs, and profile patches into three candidate packages. Generated manifests use the exact root DSH version and matching current vendor and installed third-party peers. Metadata checks alone do not establish runtime compatibility.
+
+After the repository owner completes the current artifact build, use a new output directory from the repository root; do not run preparation against stale `lib` files:
+
+```sh
+node local-plugins/session-fast/prepare.mjs --candidate-root .artifacts/local-plugin-candidates-20261108
+```
+
+The Codex Fast preparation entry point accepts the same arguments and produces the same three packages. By default, preparation reads the existing Codex Fast patch without modifying it. Add `--profile-patch <original-profile-patch>` only to snapshot a different original `llm-pi-ai` override; that input must contain exactly one Codex route and no existing `serviceTier`. Candidate patches contain provider settings; keep them private. A failure leaves an incomplete output without `candidate-build.json`; choose a new output directory after fixing the failure. No preparation command changes plugin installation, profiles, or the running GUI.
+
+Synthetic fixture tests require no current artifact build:
+
+```sh
+node --test local-plugins/session-fast/tests/prepare-candidates.test.mjs
+```
+
+The artifact metadata tests require a completed candidate root. In PowerShell, set the environment variable to that root before invoking the focused test; missing candidates fail rather than substituting legacy source manifests:
+
+```powershell
+$env:DSH_LOCAL_PLUGIN_CANDIDATE_ROOT = '.artifacts/local-plugin-candidates-20261108'
+pnpm exec vitest run --config local-plugins/session-fast/vitest.config.ts local-plugins/session-fast/tests/runtime-compatibility.spec.ts
+```
+
+The same test retains separate assertions that all three original manifests admit alpha.2 and reject the current root runtime. Built runtime and browser verification remain the repository owner's responsibility before any separate installation decision.

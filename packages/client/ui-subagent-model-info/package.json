@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-client-ui-subagent-model-info",
   "description": "Display model name and reasoning effort for subagent delegation tool calls and header lineage.",
-  "version": "0.2.2-alpha.2",
+  "version": "0.2.2-rc.1",
   "publishConfig": {
     "access": "public"
   },

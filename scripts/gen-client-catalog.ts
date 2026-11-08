@@ -50,7 +50,7 @@ const MAX_DECL_CHARS = 1200
  * scope, so the widest Session-scope slot (`tool.call.toolview`, with the
  * global and Session access seats and the subagent model-info renderers) sets the bound.
  */
-const MAX_ENTRY_LINES = 125
+const MAX_ENTRY_LINES = 126
 
 /** One register-call option as the catalog teaches it. */
 interface OptionDoc {
